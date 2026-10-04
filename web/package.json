@@ -1,0 +1,17 @@
+{
+  "name": "dmw-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:wasm": "bash ../scripts/build-wasm.sh && mkdir -p src/wasm && cp ../build-wasm/dist/dmw.mjs ../build-wasm/dist/dmw.wasm src/wasm/",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node src/smoke.ts",
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "typescript": "7.0.2",
+    "vite": "8.3.2"
+  }
+}
