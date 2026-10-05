@@ -18,6 +18,7 @@ and never uploaded.
 | Half-edge | Index-based half-edge structure; rejects non-manifold or misoriented input | |
 | Curvature | Mixed Voronoi areas, cotan mean-curvature normal, angle-defect Gaussian curvature, principal curvatures | Meyer, Desbrun, Schröder, Barr 2003 |
 | Distance | Heat-method geodesics on DEC operators (L = −d₀ᵀ⋆₁d₀), hand-written sparse LDLᵀ; Dijkstra baseline | Crane, Weischedel, Wardetzky 2013 |
+| Handles | Homology handle loops (2g per component) via tree-cotree with the greedy shortest system of loops; boundaries capped | Eppstein 2003; Erickson & Whittlesey 2005 |
 | Robustness | Intrinsic Delaunay Laplacian via intrinsic edge flips: all cotan weights ≥ 0 | Bobenko & Springborn 2007; Fisher, Springborn, Bobenko, Schröder 2007 |
 | Viewer | Overlays for defects, curvature, components, and click-to-pick geodesic isolines; cotan vs intrinsic Delaunay toggle | |
 
@@ -146,6 +147,8 @@ breakdown comes from `dmw_bench`.
   represented by vertex-triple connectivity, so it is skipped and counted (1 occurrence measured, D53).
 - **Signed mean curvature is undefined on non-orientable surfaces,** and the half-edge structure rejects them
   (D10). Topology diagnostics still work on any mesh.
+- **Handle loops are valid generators, not the shortest in their homology class.** Their lengths are upper bounds
+  on handle size (measured 3.5× the tight cycle on a synthetic handle, D64).
 - **Boundary conditions:** the heat method uses Neumann conditions only (D48).
 - **OBJ polygons are fan-triangulated,** which is correct for convex polygons only (D16).
 - **The bundle is 622 kB of JavaScript,** mostly Three.js, plus a 267 kB WASM module.
@@ -198,6 +201,8 @@ a Möbius strip, an obtuse "brick" grid and a defect showcase. No third-party or
   Computational Geometry, 2007.
 - M. Fisher, B. Springborn, A. I. Bobenko, P. Schröder. *An Algorithm for the Construction of Intrinsic
   Delaunay Triangulations with Applications to Digital Geometry Processing.* Computing 81(2/3), 2007.
+- D. Eppstein. *Dynamic Generators of Topologically Embedded Graphs.* SODA 2003.
+- J. Erickson, K. Whittlesey. *Greedy Optimal Homotopy and Homology Generators.* SODA 2005.
 - N. Sharp, K. Crane. *A Laplacian for Nonmanifold Triangle Meshes.* Computer Graphics Forum (SGP), 2020.
   Cited as the non-manifold generalization; not implemented here.
 

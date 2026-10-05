@@ -25,6 +25,7 @@ export interface Stats {
   isolatedVertices: number;
   nonmanifoldVertices: number;
   components: ComponentStats[];
+  handleLoops: { count: number; lengths: number[] }; // shortest first; lengths are upper bounds (D64)
   intrinsicDelaunay: boolean;
   flips: number; // intrinsic edge flips (when intrinsicDelaunay)
   halfedge: { ok: boolean; error: string };
@@ -47,6 +48,7 @@ export interface MeshData {
   nonmanifoldEdges: Uint32Array;
   misorientedEdges: Uint32Array;
   nonmanifoldVertices: Uint32Array;
+  handleEdges: Uint32Array; // vertex pairs of all handle loops (M8b)
   stats: Stats;
   millis: number; // wall time of load/generate + analysis + copies, measured here
 }
@@ -131,6 +133,7 @@ export class Dmw {
       nonmanifoldEdges: (s.nonmanifoldEdges() as Uint32Array).slice(),
       misorientedEdges: (s.misorientedEdges() as Uint32Array).slice(),
       nonmanifoldVertices: (s.nonmanifoldVertices() as Uint32Array).slice(),
+      handleEdges: (s.handleEdges() as Uint32Array).slice(),
       stats: JSON.parse(s.stats()) as Stats,
       millis: 0,
     };

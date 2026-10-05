@@ -15,7 +15,11 @@ const sphere = dmw.generate("icosphere").stats;
 assert.equal(sphere.components[0].genus, 0);
 close(sphere.curvature!.totalAngleDefect, 4 * Math.PI);
 
-const handle = dmw.generate("plate_handle").stats;
+const handleData = dmw.generate("plate_handle");
+assert.equal(handleData.stats.handleLoops.count, 2); // M8b: 2g loops, the boundary is not one
+assert.equal(handleData.handleEdges.length % 2, 0);
+assert.equal(dmw.generate("torus").stats.handleLoops.count, 2);
+const handle = handleData.stats;
 assert.deepEqual([handle.components[0].chi, handle.components[0].b, handle.components[0].genus], [-1, 1, 1]);
 
 const defects = dmw.generate("defects");

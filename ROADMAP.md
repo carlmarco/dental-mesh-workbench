@@ -14,7 +14,7 @@ One milestone at a time, in order. Each ends with a summary, check questions and
 | 7 | Benchmarks and README | | Done |
 | 9 | Dental scans (Teeth3DS+, local only, D60): tooth-gingiva margin and cusp/ridge detection by feature-line extraction, measured against Teeth3DS labels and 3DTeethLand cusp landmarks; scan-size optimization; handle-loop scan QA (8b) | Meyer et al. 2003 + curvature-tensor / ridge literature (to be verified) | In progress |
 | 8 | Stretch, only after 7 ships: signed heat method (implicit repair of open/noisy surfaces) | Feng & Crane 2024 | |
-| 8b | Optional: homology handle loops via tree-cotree decomposition | Eppstein 2003 (to be read) | |
+| 8b | Homology handle loops via tree-cotree decomposition (greedy shortest system) | Eppstein 2003; Erickson & Whittlesey 2005 | Done |
 
 **Out of scope:** restoration generation, remeshing, explicit mesh repair (P6), WebGPU compute. Segmentation by
 geometric feature lines is in scope (M9); ML segmentation is allowed if it becomes the obvious next step (D61).

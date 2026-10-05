@@ -14,6 +14,7 @@ export interface Layers {
   nonmanifold: boolean;
   misoriented: boolean;
   vertices: boolean;
+  handles: boolean;
   wireframe: boolean;
 }
 
@@ -22,6 +23,7 @@ export const LAYER_COLORS = {
   nonmanifold: 0xe0342b,
   misoriented: 0xf2a900,
   vertices: 0xc026d3,
+  handles: 0x16a34a,
 } as const;
 
 const EXCLUDED = 0xffffffff;
@@ -192,6 +194,7 @@ export class Viewer {
     if (layers.boundary) this.addEdges(d.boundaryEdges, LAYER_COLORS.boundary, 2.5, false);
     if (layers.misoriented) this.addEdges(d.misorientedEdges, LAYER_COLORS.misoriented, 4, true);
     if (layers.nonmanifold) this.addEdges(d.nonmanifoldEdges, LAYER_COLORS.nonmanifold, 5, true);
+    if (layers.handles) this.addEdges(d.handleEdges, LAYER_COLORS.handles, 4, true);
     if (overlay === "geodesic" && this.source !== null) {
       this.addPoints(Uint32Array.of(this.source), 0xffffff, 14);
     }

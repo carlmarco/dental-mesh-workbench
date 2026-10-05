@@ -451,3 +451,21 @@ Each entry: the choice, the alternatives considered, and the reason.
 ## D63. Exclude invalid and duplicate faces before building the half-edge structure
 - `without_excluded_faces(mesh, topology_report)` drops the faces topology already reports (D31), keeping vertex
   indexing. Used by the WASM session and scan_qa. Non-manifold edges and vertices are still rejected (D10).
+
+## D64. Handle loops (M8b): tree-cotree with the greedy shortest system of loops
+- Eppstein (SODA 2003) tree-cotree decomposition; Erickson & Whittlesey (SODA 2005) greedy choice: T = Dijkstra
+  shortest-path tree per component, C = maximum spanning dual tree on loop length sigma(e) = d(u) + l(e) + d(v);
+  leftover edges close 2g loops, each trimmed to u -> lca -> v -> u. Boundary loops are capped by one virtual
+  dual node each, so holes are never reported.
+- Tests: none on genus-0 meshes even with holes (b = 2, 3); torus: 2 independent non-separating loops, shortest =
+  the tube 8-gon exactly (1e-9); per-component counts; every loop a valid closed edge cycle.
+- **Limitation (measured):** loops are valid generators but NOT shortest in their homology class. On the plate
+  with a handle, the loop homologous to the tube's cross-section circles hole A at length 1.158 vs 0.333 for the
+  tight cycle. Reported lengths are therefore upper bounds on handle size. Tightening (shortest homologous
+  cycles) is future work.
+- **Real scans (100, native Release):** 1,062 loops; count = 2 * sum(genus) on every scan (exact invariant on real
+  data); median 24 ms per scan (p95 34). Loop length p10 0.47 mm, median 1.91 mm, p90 21.8 mm, max 126 mm. In the
+  browser (WASM), scan 3TROMS4N_lower (93,610 vertices, 17.7 MB OBJ) loads and is fully analysed, including handle
+  loops, in 382 ms; the loops visibly cluster at interproximal contacts (qualitative, consistent with fused
+  neighbouring crowns).
+- Viewer: "Handle loops" layer and stats; dev-server-only `server.fs.allow: ["../data"]` to open local scans.

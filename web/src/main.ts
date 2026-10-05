@@ -45,7 +45,7 @@ function overlay(): Overlay {
 }
 function layers(): Layers {
   const on = (v: string) => document.querySelector<HTMLInputElement>(`#layers input[value="${v}"]`)!.checked;
-  return { boundary: on("boundary"), nonmanifold: on("nonmanifold"), misoriented: on("misoriented"), vertices: on("vertices"), wireframe: on("wireframe") };
+  return { boundary: on("boundary"), nonmanifold: on("nonmanifold"), misoriented: on("misoriented"), vertices: on("vertices"), handles: on("handles"), wireframe: on("wireframe") };
 }
 
 // Heat-method distance from `source`; the first query on a mesh also factors the solver.
@@ -145,10 +145,12 @@ function renderStats(s: Stats, millis: number): void {
       ${defect("Non-manifold edges", s.edgeKinds.nonmanifold, LAYER_COLORS.nonmanifold)}
       ${defect("Misoriented edges", s.edgeKinds.misoriented, LAYER_COLORS.misoriented)}
       ${defect("Non-manifold vertices", s.nonmanifoldVertices, LAYER_COLORS.vertices)}
+      ${defect("Handle loops (2 per handle)", s.handleLoops.count, LAYER_COLORS.handles)}
       ${defect("Invalid faces", s.invalidFaces)}
       ${defect("Duplicate faces", s.duplicateFaces)}
       ${defect("Isolated vertices", s.isolatedVertices)}
     </dl>
+    ${s.handleLoops.count ? `<p class="hint">Handle loops: shortest ${s.handleLoops.lengths.slice(0, 5).map(fmt).join(", ")}${s.handleLoops.count > 5 ? ", …" : ""} (mesh units; upper bounds on handle size).</p>` : ""}
     <h2>Curvature</h2>${curv}`;
 }
 

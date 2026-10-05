@@ -16,6 +16,7 @@
 #include "core/generate.h"
 #include "core/geodesic.h"
 #include "core/halfedge.h"
+#include "core/handles.h"
 #include "core/io.h"
 #include "core/topology.h"
 #include "core/weld.h"
@@ -86,6 +87,7 @@ public:
     val nonmanifoldEdges() const { return view(nonmanifold_edges_); }
     val misorientedEdges() const { return view(misoriented_edges_); }
     val nonmanifoldVertices() const { return view(topo_.nonmanifold_vertices); }
+    val handleEdges() const { return view(handle_edges_); }  // uint32 vertex pairs of all handle loops
 
     // Switch curvature and geodesics between the cotan and the intrinsic Delaunay Laplacian.
     void setIntrinsicDelaunay(bool on) {
@@ -145,7 +147,10 @@ public:
             else o << "null";
             o << '}';
         }
-        o << "],\"intrinsicDelaunay\":" << (intrinsic_delaunay_ ? "true" : "false")
+        o << "],\"handleLoops\":{\"count\":" << handle_lengths_.size() << ",\"lengths\":[";
+        for (std::size_t i = 0; i < handle_lengths_.size() && i < 64; ++i) o << (i ? "," : "") << handle_lengths_[i];
+        o << "]}";
+        o << ",\"intrinsicDelaunay\":" << (intrinsic_delaunay_ ? "true" : "false")
           << ",\"flips\":" << curvature_.intrinsic_flips << ",\"halfedge\":{\"ok\":" << (he_error_.empty() ? "true" : "false") << ",\"error\":\""
           << json_escape(he_error_) << "\"},\"curvature\":";
         if (!he_error_.empty()) {
@@ -175,6 +180,19 @@ private:
         he_mesh_ = he.ok() ? std::make_unique<HalfEdgeMesh>(std::move(he.mesh)) : nullptr;
         distance_.clear();
         update_curvature();
+        // Handle loops (M8b): 2g generator cycles per component, shortest first (lengths are upper
+        // bounds on handle size, D64). Stored as line segments for the viewer.
+        handle_edges_.clear();
+        handle_lengths_.clear();
+        if (he_mesh_) {
+            for (const auto& loop : handle_loops(*he_mesh_)) {
+                handle_lengths_.push_back(loop.length);
+                for (std::size_t i = 0; i < loop.vertices.size(); ++i) {
+                    handle_edges_.push_back(loop.vertices[i]);
+                    handle_edges_.push_back(loop.vertices[(i + 1) % loop.vertices.size()]);
+                }
+            }
+        }
 
         // GPU-facing buffers: float32 positions (D12: double in the core, float at the GPU).
         positions_.clear();
@@ -221,7 +239,8 @@ private:
     std::vector<float> distance_;
     std::vector<float> positions_, mean_, gaussian_;
     std::vector<std::uint32_t> indices_, face_component_, boundary_edges_, nonmanifold_edges_,
-        misoriented_edges_;
+        misoriented_edges_, handle_edges_;
+    std::vector<double> handle_lengths_;
 };
 
 }  // namespace
@@ -240,6 +259,7 @@ EMSCRIPTEN_BINDINGS(dmw) {
         .function("nonmanifoldEdges", &Session::nonmanifoldEdges)
         .function("misorientedEdges", &Session::misorientedEdges)
         .function("nonmanifoldVertices", &Session::nonmanifoldVertices)
+        .function("handleEdges", &Session::handleEdges)
         .function("setIntrinsicDelaunay", &Session::setIntrinsicDelaunay)
         .function("geodesic", &Session::geodesic)
         .function("distance", &Session::distance)
