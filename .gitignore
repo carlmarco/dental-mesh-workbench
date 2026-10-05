@@ -4,3 +4,6 @@ node_modules/
 web/src/wasm/
 web/dist/
 .DS_Store
+
+# Local notes (never published)
+docs/MUST_READ_INTERVIEW_PREP.md

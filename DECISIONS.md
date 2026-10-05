@@ -56,5 +56,113 @@ Each entry: the choice, the alternatives considered, and the reason.
 
 ## D9. Known issue: `node:module` warning in Vite build
 - `-sENVIRONMENT=web,node` leaves a Node code path in the glue, so Vite warns that `node:module` was
-  externalized for the browser. The build succeeds. Not yet verified at runtime in a browser.
+  externalized for the browser. The build succeeds, and the page renders correctly in a browser
+  (verified manually, M1).
   Candidate fix: build a web-only variant for Vite and keep the node variant for tests.
+
+## D10. Half-edge builder rejects non-manifold input
+- **Choice:** construction fails with an error if any directed edge occurs twice (an edge with 3+ faces, or
+  inconsistent orientation). Topology diagnostics (M3) run on the raw indexed mesh instead.
+- **Alternatives:** a tolerant half-edge structure that records non-manifold edges.
+- **Reason:** keeps the half-edge invariants strict (`twin` is an involution) and the traversal code simple;
+  broken meshes never need half-edge form to be diagnosed.
+
+## D11. Division of work
+- Loaders, welding and plumbing are written by Claude; half-edge, cotan weights, curvature and the heat
+  method are written by the author.
+- **Amendment (M2):** at the author's explicit request, Claude wrote `halfedge.cpp`, following the formal
+  algorithm reviewed beforehand. Tests were verified to catch planted bugs (see D26).
+
+## D12. `double` positions in the core
+- **Alternatives:** `float`.
+- **Reason:** cotangent weights and angle-defect sums amplify rounding error; `float` is used only at the
+  GPU boundary.
+
+## D13. `uint32_t` vertex indices
+- **Alternatives:** `size_t`, `int`.
+- **Reason:** half the memory of `size_t`, and maps directly to WebGL `Uint32Array` index buffers.
+
+## D14. Parsers take text/bytes, not file paths
+- **Reason:** follows from D6; the browser provides bytes, not paths. Tests use inline fixtures.
+
+## D15. Errors as return values, not exceptions
+- **Alternatives:** exceptions; `std::expected` (C++23).
+- **Reason:** Emscripten's default `DISABLE_EXCEPTION_CATCHING=1` (checked in emsdk 6.0.11) makes a throw
+  abort the module. A small `LoadResult { mesh; error; ok() }` works on both targets.
+
+## D16. OBJ polygons are fan-triangulated
+- **Reason:** simple and preserves winding.
+- **Limitation:** correct only for convex polygons (or star-shaped from the first vertex). Ear clipping
+  would be the general fix; out of scope.
+
+## D18. `strtod` (not `std::from_chars`) for parsing floats
+- **Finding:** `std::from_chars` for `double` compiles and is correct under Emscripten 6.0.11, but is a
+  deleted overload in Apple's system libc++ (Apple clang 17). Integer `from_chars` works on both.
+- **Choice:** `std::strtod` on a NUL-terminated copy of each token, rejecting partial parses and non-finite
+  values.
+- **Alternatives:** `from_chars` behind a feature check (two code paths that behave differently between
+  native and WASM); a third-party parser such as fast_float (extra dependency).
+- **Caveat:** `strtod` honors the C locale's decimal separator. We never call `setlocale`, so it stays `"C"`
+  (decimal point `.`). An application embedding this core that changes the locale could break parsing.
+
+## D19. STL: detect binary by size; ignore stored normals
+- **Choice:** binary iff `size == 84 + 50*N` (N = uint32 at offset 80, computed in 64-bit); otherwise parse as
+  ASCII. Facet normals are read past but not used.
+- **Alternatives:** sniff for a leading `"solid"`; trust stored normals.
+- **Reason:** many binary exporters put `"solid"` in the 80-byte header, so prefix sniffing misclassifies them.
+  Stored normals are frequently zero or inconsistent; orientation is defined by vertex winding, which is what
+  the half-edge structure uses.
+
+## D20. Vertex welding: exact by default, optional epsilon (grid hash)
+- **Choice:** `weld_vertices(soup, eps)`. `eps == 0`: exact coordinate match (with -0.0 normalized to +0.0).
+  `eps > 0`: uniform grid with cell size eps, checking the 27 neighboring cells; first-representative rule.
+- **Alternatives:** exact only; epsilon only; union-find clustering (transitive, can chain-merge distant points).
+- **Reason:** exact can never merge distinct vertices and fits well-formed STL; epsilon repairs noisy exports.
+  The first-representative rule is deterministic and bounds drift: every merged point is within eps of its
+  representative, which union-find does not guarantee.
+
+## D21. Welding never drops triangles
+- **Reason:** silently deleting geometry hides defects. Collapsed (degenerate) triangles are kept and reported by
+  the topology diagnostics (M3).
+
+## Proposals (not yet decided)
+- **P1.** Adopted, see D22.
+- **P2. Intrinsic Delaunay cotan Laplacian** (Sharp & Crane 2020, "A Laplacian for Nonmanifold Triangle Meshes",
+  CGF / SGP 2020) as an M6 extension addressing the obtuse-triangle caveat.
+- **P3. Signed heat method** (Feng & Crane 2024, "A Heat Method for Generalized Signed Distance", ACM TOG 43(4))
+  as a far stretch after M6.
+- **P4.** Adopted, see D23.
+- **P5. Handle loops** via tree-cotree decomposition (Eppstein 2003, not yet read) for visualizing H1 generators.
+- **P6. Explicit repair** (hole filling, handle cutting/patching): rejected for now as mesh modification adjacent to
+  the out-of-scope remeshing; implicit repair via P3 preferred.
+
+## D22. Genus and Betti numbers per component in M3
+- **Choice:** M3 reports, per connected component, chi, boundary loop count b, genus g = (2 - chi - b)/2 and
+  beta1, flagging non-integer or negative g as "not a manifold surface".
+- **Reason:** nearly free given chi, components and boundary loops; detects spurious handles, a real scan defect.
+
+## D23. Test data: synthetic plus CC0 only
+- **Choice:** generated meshes, plus selected CC0 models from Keenan Crane's model repository, each with its
+  license recorded in the repo. No dental scan data.
+- **Reason:** unambiguous licensing.
+
+## D24. Shared private number parser
+- `detail/parse_number.h` (not under `include/`, so not part of the public API) holds `parse_double` for both text
+  parsers, so OBJ and ASCII STL cannot drift apart in how they read numbers.
+
+## D25. Half-edge layout: index-based, implicit next/face; bowtie vertices rejected
+- **Choice:** half-edge `3f+k` runs `tri[f][k] -> tri[f][(k+1)%3]`; `next`, `prev`, `face` are arithmetic. Stored per
+  half-edge: `origin`, `twin`; per vertex: one outgoing half-edge (the boundary one for boundary vertices).
+  Structure-of-arrays of `uint32_t`, `kInvalid = UINT32_MAX` for "none".
+- **Alternatives:** pointer-based half-edge objects; storing `next`/`face` explicitly (needed for general polygon
+  meshes); OpenMesh / CGAL / geometry-central.
+- **Reason:** triangle-only (all loaders triangulate), so implicit `next` removes a stored array and a class of
+  consistency bugs. Indices instead of pointers survive vector reallocation, are half the size of 64-bit pointers,
+  and can be passed to JS / WASM memory as plain arrays (M5). Writing it ourselves is the point of the project.
+- **Bowtie vertices** (faces around a vertex forming several fans) are rejected along with non-manifold edges (D10),
+  so every vertex's star is a single fan and one-ring traversal is complete.
+
+## D26. Mutation check for geometry tests
+- **Practice:** after a routine passes, plant the known classic bugs and confirm the tests fail.
+- **M2 result:** `next(h) = h + 1` -> 6 of 30 tests fail; clockwise rotation in `one_ring` -> 3 of 30 fail.
+- **Reason:** a passing suite only means something if it can fail.
