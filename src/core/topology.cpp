@@ -257,3 +257,20 @@ TopologyReport analyze_topology(const TriMesh& mesh) {
 }
 
 }  // namespace dmw
+
+namespace dmw {
+
+TriMesh without_excluded_faces(const TriMesh& mesh, const TopologyReport& report) {
+    std::vector<bool> drop(mesh.triangles.size(), false);
+    for (std::uint32_t f : report.invalid_faces) drop[f] = true;
+    for (std::uint32_t f : report.duplicate_faces) drop[f] = true;
+    TriMesh out;
+    out.positions = mesh.positions;
+    out.triangles.reserve(mesh.triangles.size());
+    for (std::size_t f = 0; f < mesh.triangles.size(); ++f) {
+        if (!drop[f]) out.triangles.push_back(mesh.triangles[f]);
+    }
+    return out;
+}
+
+}  // namespace dmw

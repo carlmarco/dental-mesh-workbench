@@ -408,3 +408,46 @@ Each entry: the choice, the alternatives considered, and the reason.
   loads through the relative hashed asset path).
 - File picker is now a real <button> forwarding to the hidden input (keyboard-accessible; M5 gap closed).
   Bundle size left as a documented limitation.
+
+## D60. Data policy change: public dental scans allowed (author's decision, 2026-10-05)
+- Supersedes D23: public, legally licensed dental scan data is allowed (the author's decision).
+- **License findings (checked 2026-10-05):**
+  - **Teeth3DS+** (1,800 intraoral scans, 900 patients; OBJ + JSON per-vertex FDI labels, 0 = gingiva; OSF
+    osf.io/xctdy): **CC BY-NC-ND 4.0** per the official challenge repository (github.com/abenhamadou/
+    3dteethseg22_challenge); its code is MIT. A ResearchGate listing saying CC BY 4.0 conflicts; the official
+    source wins.
+  - **3DTeethLand landmarks** (340 scans; Mesial, Distal, Cusp, Inner, Outer, Facial points as 3D coordinates
+    in JSON; OSF osf.io/gvjah): **CC BY-NC-ND**. (The Zenodo record 10991302 is CC BY 4.0 but holds only the
+    challenge description PDF.)
+  - **Tsinghua pre/post-orthodontic dataset** (Zenodo 11392406, labelled CC0): access requires a signed data use
+    agreement restricting use to academic purposes. **Not used** (the author works in industry).
+  - **FDI 16** (single-tooth meshes, reported CC BY-NC-SA): details unverified; not used yet.
+- **Consequences of NC-ND:** use locally for non-commercial evaluation and publish aggregate metrics with
+  attribution; do NOT commit or host scans or any modified/derived meshes (decimated, converted, processed).
+  Data lives outside the repo (`data/` is git-ignored); the public demo hosts no scans (users open their own
+  files locally, as the viewer already allows).
+
+## D61. Scope change: dental feature-line extraction; ML not blocked
+- Tooth-gingiva margin and cusp/ridge detection by geometric feature-line extraction first. ML segmentation is no
+  longer out of scope: if geometry plateaus and ML is the obvious next step, it proceeds (open question to
+  resolve then: whether trained weights count as derivatives under NC-ND). Optimization for real scan sizes is in
+  scope.
+
+## D62. Real-scan QA (3DTeethLand test set, 100 scans = Teeth3DS+ data part 7; local only)
+- `tools/scan_qa` runs the viewer pipeline over every OBJ in a directory; per-scan CSV stays local (D60).
+- The downloaded part 7 is exactly the 3DTeethLand **test** set (all 100 IDs in its testing lists, none in the
+  Teeth3DS splits) and contains **no labels or landmarks**: margin and cusp ground truth still need the
+  labelled Teeth3DS parts and the 3DTeethLand landmark files.
+- Measured (2026-10-05, native Release, Apple M4): median 106k vertices (75k-216k); median parse 23 ms,
+  topology 65 ms, half-edge 67 ms, curvature 16 ms per scan. Before D63, **25/100** scans failed the half-edge
+  build (24 because of collapsed faces, i.e. all three corners the same vertex, typically exactly 64 per scan);
+  after D63, **3/100** (genuinely non-manifold). 97/100 scans have more than one component (92 have 5+: debris).
+  Largest component genus: 0 in only 9 scans, up to 26; boundary loops 1-5. Exact-welding three scans (genus 0,
+  4, 26) changed neither vertex count nor genus, so the handles are not unwelded-vertex artifacts.
+- Debugging note: a probe crash turned out to be zsh not word-splitting an unquoted `$F` (three paths passed as
+  one) plus the probe dereferencing a null "largest component" for an empty mesh. Sanitizer builds of the core
+  on real scans were clean.
+
+## D63. Exclude invalid and duplicate faces before building the half-edge structure
+- `without_excluded_faces(mesh, topology_report)` drops the faces topology already reports (D31), keeping vertex
+  indexing. Used by the WASM session and scan_qa. Non-manifold edges and vertices are still rejected (D10).

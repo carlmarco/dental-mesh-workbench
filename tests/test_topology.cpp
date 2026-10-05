@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "core/generate.h"
+#include "core/halfedge.h"
 #include "core/topology.h"
 
 using namespace dmw;
@@ -220,4 +221,21 @@ TEST_CASE("topology: empty mesh has no components", "[topology]") {
     const auto r = analyze_topology(TriMesh{});
     CHECK(r.components.empty());
     CHECK(r.edges.empty());
+}
+
+TEST_CASE("topology: excluding collapsed and duplicate faces lets a scan-like mesh build", "[topology]") {
+    // Real scans contain triangles like (v, v, v). The rest is a clean tetrahedron.
+    auto m = tetra();
+    m.triangles.push_back({2, 2, 2});  // collapsed
+    m.triangles.push_back({3, 1, 0});  // duplicate of face 1 = {0, 1, 3}
+    REQUIRE_FALSE(build_halfedge(m).ok());
+    const auto cleaned = without_excluded_faces(m, analyze_topology(m));
+    CHECK(cleaned.positions.size() == m.positions.size());  // vertex indexing preserved
+    CHECK(cleaned.triangles.size() == 4);
+    CHECK(build_halfedge(cleaned).ok());
+}
+
+TEST_CASE("topology: excluding faces does not hide non-manifold defects", "[topology]") {
+    const auto m = make_defect_showcase();
+    CHECK_FALSE(build_halfedge(without_excluded_faces(m, analyze_topology(m))).ok());  // fin, bowtie remain
 }

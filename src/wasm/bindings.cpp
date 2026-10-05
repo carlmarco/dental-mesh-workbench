@@ -167,7 +167,9 @@ private:
     void set_mesh(TriMesh m) {
         mesh_ = std::move(m);
         topo_ = analyze_topology(mesh_);
-        auto he = build_halfedge(mesh_);  // fails on non-manifold input (D10): no curvature then
+        // Collapsed/duplicate faces are reported by topology and excluded here (D63); only genuinely
+        // non-manifold input still fails (D10), in which case there is no curvature.
+        auto he = build_halfedge(without_excluded_faces(mesh_, topo_));
         he_error_ = he.error;
         geodesics_.reset();  // rebuilt lazily for each new mesh
         he_mesh_ = he.ok() ? std::make_unique<HalfEdgeMesh>(std::move(he.mesh)) : nullptr;

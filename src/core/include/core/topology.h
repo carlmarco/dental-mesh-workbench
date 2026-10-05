@@ -61,4 +61,10 @@ struct TopologyReport {
 // counts describe the underlying simplicial complex. O(F log F) worst case, O(F) typical.
 TopologyReport analyze_topology(const TriMesh& mesh);
 
+// The mesh without the report's invalid and duplicate faces (D63). Vertices are kept unchanged,
+// so per-vertex results still line up with the input. Real scans contain collapsed triangles
+// (all three corners the same vertex); excluding them lets the half-edge build succeed when the
+// rest of the surface is manifold. Non-manifold edges and vertices are NOT touched.
+TriMesh without_excluded_faces(const TriMesh& mesh, const TopologyReport& report);
+
 }  // namespace dmw

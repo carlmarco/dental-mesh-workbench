@@ -7,3 +7,6 @@ web/dist/
 
 # Local notes (never published)
 docs/MUST_READ_INTERVIEW_PREP.md
+
+# Local datasets (licensed for local use only; never commit, D60)
+data/
