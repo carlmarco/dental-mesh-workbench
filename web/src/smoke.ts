@@ -25,8 +25,11 @@ assert.deepEqual([handle.components[0].chi, handle.components[0].b, handle.compo
 const defects = dmw.generate("defects");
 assert.equal(defects.stats.edgeKinds.nonmanifold, 1);
 assert.deepEqual(Array.from(defects.nonmanifoldVertices), [24]);
-assert.equal(defects.stats.halfedge.ok, false); // non-manifold: no curvature (D10)
-assert.equal(defects.stats.curvature, null);
+// D69: faces at the defects are excluded from the half-edge analysis view, so curvature still runs;
+// the topology report above still describes the full input.
+assert.equal(defects.stats.halfedge.ok, true);
+assert.ok(defects.stats.excludedFaces > 0 && defects.stats.excludedFaces < 20);
+assert.ok(defects.stats.curvature !== null);
 
 // Heat-method geodesics through WASM: icosahedron vertices 0 and 3 are antipodal on the
 // unit sphere, so their distance is pi (measured heat error at this resolution: < 3e-2).
@@ -34,7 +37,10 @@ dmw.generate("icosphere");
 const geo = dmw.geodesic(0);
 close(geo.distance[0], 0, 1e-12);
 close(geo.distance[3], Math.PI, 5e-2);
-assert.throws(() => (dmw.generate("defects"), dmw.geodesic(0)), /manifold/);
+// Cusp detection through WASM runs and returns vertex ids within range.
+const sph = dmw.generate("icosphere");
+const tips = dmw.detectCusps().vertices;
+assert.ok(tips.every((v) => v < sph.stats.vertices));
 
 // Intrinsic Delaunay (M6b) through WASM: the brick grid has obtuse triangles, needs flips, and
 // geodesics stay accurate; Gauss-Bonnet is untouched (angle defects are intrinsic).
@@ -69,4 +75,4 @@ assert.equal(obj.stats.components[0].b, 1);
 assert.throws(() => dmw.loadFile(new TextEncoder().encode("f 1 2 3\n"), "obj"), /line 1/);
 
 dmw.dispose();
-console.log("smoke ok: WASM topology, curvature and STL/OBJ input match the native results; geodesics and intrinsic Delaunay OK");
+console.log("smoke ok: WASM topology, curvature and STL/OBJ input match the native results; geodesics, intrinsic Delaunay, cusp detection OK");

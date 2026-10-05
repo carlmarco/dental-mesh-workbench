@@ -10,3 +10,10 @@ target_compile_options(dmw_bench PRIVATE -Wall -Wextra -Wpedantic -Wconversion -
 add_executable(scan_qa scan_qa.cpp)
 target_link_libraries(scan_qa PRIVATE dmw_core)
 target_compile_options(scan_qa PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Cusp detection evaluation (local, license-restricted data; D60, D67):
+#   ./build-release/tools/cusp_eval sweep data/3DTeethLand_landmarks_train data/data_part_1
+#   ./build-release/tools/cusp_eval test  data/3DTeethLand_landmarks_test  data/data_part_7
+add_executable(cusp_eval cusp_eval.cpp)
+target_link_libraries(cusp_eval PRIVATE dmw_core)
+target_compile_options(cusp_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)

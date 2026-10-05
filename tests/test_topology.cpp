@@ -239,3 +239,20 @@ TEST_CASE("topology: excluding faces does not hide non-manifold defects", "[topo
     const auto m = make_defect_showcase();
     CHECK_FALSE(build_halfedge(without_excluded_faces(m, analyze_topology(m))).ok());  // fin, bowtie remain
 }
+
+TEST_CASE("topology: manifold analysis view of the defect showcase builds, excluding few faces", "[topology]") {
+    const auto m = make_defect_showcase();
+    const auto a = manifold_analysis_mesh(m);
+    REQUIRE(a.manifold);
+    CHECK(build_halfedge(a.mesh).ok());
+    CHECK(a.mesh.positions.size() == m.positions.size());  // vertex indexing unchanged
+    CHECK(a.excluded_faces > 0);
+    CHECK(a.excluded_faces < 20);  // fin edge, bowtie, flipped face and neighbours, seam, invalid, duplicate
+}
+
+TEST_CASE("topology: a clean mesh passes through untouched", "[topology]") {
+    const auto a = manifold_analysis_mesh(make_torus(8, 5));
+    CHECK(a.manifold);
+    CHECK(a.excluded_faces == 0);
+    CHECK(a.passes == 0);
+}

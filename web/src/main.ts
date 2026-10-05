@@ -1,6 +1,7 @@
 import "./style.css";
 
 import { categorical } from "./colormap.ts";
+import { matchPoints, parseCuspLandmarks } from "./cusps.ts";
 import { Dmw, type MeshData, type Preset, PRESETS, type Stats } from "./dmw.ts";
 import { ISOLINES, LAYER_COLORS, type Layers, type Overlay, Viewer } from "./viewer.ts";
 
@@ -29,6 +30,10 @@ const viewer = new Viewer(view);
 let data: MeshData | null = null;
 let geodesicInfo = ""; // legend text for the current distance field
 let geodesicSource = 0;
+let cuspXyz: Float32Array | null = null;
+let truthXyz: Float32Array | null = null;
+let cuspInfo = "";
+let cuspMillis: number | null = null;
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
 const rgb = ([r, g, b]: number[]) => `rgb(${r * 255}, ${g * 255}, ${b * 255})`;
@@ -45,7 +50,7 @@ function overlay(): Overlay {
 }
 function layers(): Layers {
   const on = (v: string) => document.querySelector<HTMLInputElement>(`#layers input[value="${v}"]`)!.checked;
-  return { boundary: on("boundary"), nonmanifold: on("nonmanifold"), misoriented: on("misoriented"), vertices: on("vertices"), handles: on("handles"), wireframe: on("wireframe") };
+  return { boundary: on("boundary"), nonmanifold: on("nonmanifold"), misoriented: on("misoriented"), vertices: on("vertices"), handles: on("handles"), cusps: on("cusps"), wireframe: on("wireframe") };
 }
 
 // Heat-method distance from `source`; the first query on a mesh also factors the solver.
@@ -67,6 +72,12 @@ function display(d: MeshData, keepCamera: boolean): void {
   if (d !== data) {
     viewer.setGeodesic(null, null); // a new mesh invalidates the distance field
     geodesicInfo = "";
+    if (!keepCamera) {
+      cuspXyz = truthXyz = null;
+      cuspInfo = "";
+      cuspMillis = null;
+      viewer.setCusps(null, null);
+    }
   }
   data = d;
   errorBox.textContent = "";
@@ -151,6 +162,8 @@ function renderStats(s: Stats, millis: number): void {
       ${defect("Isolated vertices", s.isolatedVertices)}
     </dl>
     ${s.handleLoops.count ? `<p class="hint">Handle loops: shortest ${s.handleLoops.lengths.slice(0, 5).map(fmt).join(", ")}${s.handleLoops.count > 5 ? ", …" : ""} (mesh units; upper bounds on handle size).</p>` : ""}
+    ${s.excludedFaces ? `<p class="hint">${s.excludedFaces} faces at defects excluded from the half-edge analysis view (D69).</p>` : ""}
+    ${cuspInfo ? `<h2>Cusps</h2><p>${cuspInfo}</p>` : ""}
     <h2>Curvature</h2>${curv}`;
 }
 
@@ -192,6 +205,45 @@ view.addEventListener("drop", (e) => {
   const f = e.dataTransfer?.files[0];
   if (f) void openFile(f);
 });
+function updateCuspInfo(): void {
+  const parts: string[] = [];
+  if (cuspXyz) parts.push(`${cuspXyz.length / 3} tips detected${cuspMillis !== null ? ` in ${cuspMillis.toFixed(0)} ms` : ""}`);
+  if (truthXyz) parts.push(`${truthXyz.length / 3} landmarks loaded`);
+  if (cuspXyz && truthXyz) {
+    const m = matchPoints(cuspXyz, truthXyz, 1.0);
+    const p = m.tp / Math.max(m.detections, 1), r = m.tp / Math.max(m.truth, 1);
+    parts.push(`at 1 mm: precision ${p.toFixed(2)}, recall ${r.toFixed(2)}, F1 ${(p + r > 0 ? (2 * p * r) / (p + r) : 0).toFixed(2)}, median error ${m.medianError.toFixed(2)} mm`);
+  }
+  cuspInfo = parts.join(" · ");
+  viewer.setCusps(cuspXyz, truthXyz);
+  if (data) display(data, true);
+}
+
+byId<HTMLButtonElement>("detect").addEventListener("click", () => {
+  if (!data) return;
+  try {
+    const c = dmw.detectCusps();
+    cuspXyz = new Float32Array(c.vertices.length * 3);
+    c.vertices.forEach((v, i) => cuspXyz!.set(data!.positions.subarray(3 * v, 3 * v + 3), 3 * i));
+    cuspMillis = c.millis;
+    updateCuspInfo();
+  } catch (e) {
+    errorBox.textContent = (e as Error).message;
+  }
+});
+const landmarkInput = byId<HTMLInputElement>("landmarks");
+byId<HTMLButtonElement>("open-landmarks").addEventListener("click", () => landmarkInput.click());
+landmarkInput.addEventListener("change", async () => {
+  const f = landmarkInput.files?.[0];
+  if (!f) return;
+  try {
+    truthXyz = parseCuspLandmarks(await f.text());
+    updateCuspInfo();
+  } catch (e) {
+    errorBox.textContent = `Could not read landmarks: ${(e as Error).message}`;
+  }
+});
+
 viewer.onPick = (v) => {
   if (overlay() !== "geodesic" || !data) return;
   if (computeGeodesic(v)) display(data, true);

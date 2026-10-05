@@ -274,3 +274,50 @@ TriMesh without_excluded_faces(const TriMesh& mesh, const TopologyReport& report
 }
 
 }  // namespace dmw
+
+namespace dmw {
+
+AnalysisMesh manifold_analysis_mesh(const TriMesh& input, int max_passes) {
+    AnalysisMesh out;
+    out.mesh = input;
+    for (out.passes = 0; out.passes <= max_passes; ++out.passes) {
+        BuildResult built = build_halfedge(out.mesh);
+        if (built.ok()) {
+            out.halfedge = std::move(built.mesh);
+            out.manifold = true;
+            break;
+        }
+        if (out.passes == max_passes) break;
+        const TopologyReport r = analyze_topology(out.mesh);
+        std::vector<bool> drop(out.mesh.triangles.size(), false);
+        for (std::uint32_t f : r.invalid_faces) drop[f] = true;
+        for (std::uint32_t f : r.duplicate_faces) drop[f] = true;
+        std::vector<bool> bad_vertex(out.mesh.positions.size(), false);
+        for (std::uint32_t v : r.nonmanifold_vertices) bad_vertex[v] = true;
+        // Edges to cut around: non-manifold (3+ faces) and misoriented (winding flips there).
+        std::unordered_set<std::uint64_t> bad_edge;
+        for (std::size_t e = 0; e < r.edges.size(); ++e) {
+            if (r.edge_kind[e] == EdgeKind::NonManifold || r.edge_kind[e] == EdgeKind::Misoriented) {
+                bad_edge.insert(detail::pack_pair(r.edges[e].v0, r.edges[e].v1));
+            }
+        }
+        for (std::size_t f = 0; f < out.mesh.triangles.size(); ++f) {
+            if (drop[f]) continue;
+            const auto& t = out.mesh.triangles[f];
+            for (std::size_t k = 0; k < 3 && !drop[f]; ++k) {
+                const std::uint32_t a = t[k], b = t[(k + 1) % 3];
+                if (bad_vertex[a] || bad_edge.count(detail::pack_pair(std::min(a, b), std::max(a, b))) != 0) drop[f] = true;
+            }
+        }
+        std::vector<std::array<std::uint32_t, 3>> kept;
+        kept.reserve(out.mesh.triangles.size());
+        for (std::size_t f = 0; f < out.mesh.triangles.size(); ++f) {
+            if (!drop[f]) kept.push_back(out.mesh.triangles[f]);
+        }
+        out.mesh.triangles = std::move(kept);
+    }
+    out.excluded_faces = input.triangles.size() - out.mesh.triangles.size();
+    return out;
+}
+
+}  // namespace dmw

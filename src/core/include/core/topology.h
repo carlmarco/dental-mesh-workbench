@@ -6,6 +6,7 @@
 #include <optional>
 #include <vector>
 
+#include "core/halfedge.h"
 #include "core/mesh.h"
 
 namespace dmw {
@@ -66,5 +67,19 @@ TopologyReport analyze_topology(const TriMesh& mesh);
 // (all three corners the same vertex); excluding them lets the half-edge build succeed when the
 // rest of the surface is manifold. Non-manifold edges and vertices are NOT touched.
 TriMesh without_excluded_faces(const TriMesh& mesh, const TopologyReport& report);
+
+// Analysis view for the half-edge-based algorithms on real scans (D69). Repeatedly excludes the
+// report's invalid and duplicate faces plus every face touching a non-manifold or misoriented edge
+// or a non-manifold vertex, until the remainder is a manifold the half-edge build accepts (or
+// `max_passes` is reached). Vertex indexing is unchanged; the input is not modified. Typical real
+// scan: ~0.05% of faces excluded instead of rejecting the whole scan.
+struct AnalysisMesh {
+    TriMesh mesh;
+    HalfEdgeMesh halfedge;           // valid iff manifold: built once here, so callers don't rebuild
+    std::size_t excluded_faces = 0;  // relative to the input
+    int passes = 0;
+    bool manifold = false;           // build_halfedge(mesh) succeeds
+};
+AnalysisMesh manifold_analysis_mesh(const TriMesh& mesh, int max_passes = 4);
 
 }  // namespace dmw

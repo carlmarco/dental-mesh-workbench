@@ -75,7 +75,10 @@ int main(int argc, char** argv) {
         const TopologyReport topo_r = analyze_topology(r.mesh);
         const double t_topo = ms_since(t0);
         t0 = Clock::now();
-        const BuildResult hb = build_halfedge(without_excluded_faces(r.mesh, topo_r));  // D63
+        const AnalysisMesh analysis = manifold_analysis_mesh(r.mesh);  // D63, D69
+        BuildResult hb;
+        if (analysis.manifold) hb.mesh = analysis.halfedge;
+        else hb.error = "not manifold after exclusion";
         const double t_he = ms_since(t0);
         double t_curv = 0.0, t_handles = 0.0, shortest = 0.0, median_loop = 0.0;
         std::size_t zero_area = 0, num_loops = 0;
@@ -88,8 +91,10 @@ int main(int argc, char** argv) {
             t_handles = ms_since(t0);
             num_loops = loops.size();
             // Exact check on real data: one generator pair per handle, summed over components.
+            // Compare against the genus of the analysis view the loops were computed on: excluding
+            // faces at defects can change the topology of the full input.
             std::uint32_t genus_sum = 0;
-            for (const auto& c : topo_r.components) genus_sum += c.genus.value_or(0);
+            for (const auto& c : analyze_topology(analysis.mesh).components) genus_sum += c.genus.value_or(0);
             if (num_loops != 2 * genus_sum) {
                 ++loop_count_mismatch;
                 std::fprintf(stderr, "%s: %zu loops but 2 * genus = %u\n", path.stem().c_str(), num_loops, 2 * genus_sum);

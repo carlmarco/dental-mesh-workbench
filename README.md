@@ -20,6 +20,7 @@ and never uploaded.
 | Distance | Heat-method geodesics on DEC operators (L = −d₀ᵀ⋆₁d₀), hand-written sparse LDLᵀ; Dijkstra baseline | Crane, Weischedel, Wardetzky 2013 |
 | Handles | Homology handle loops (2g per component) via tree-cotree with the greedy shortest system of loops; boundaries capped | Eppstein 2003; Erickson & Whittlesey 2005 |
 | Robustness | Intrinsic Delaunay Laplacian via intrinsic edge flips: all cotan weights ≥ 0 | Bobenko & Springborn 2007; Fisher, Springborn, Bobenko, Schröder 2007 |
+| Dental scans | Cusp-tip detection by occlusal prominence, evaluated on 3DTeethLand landmarks; manifold analysis view for real scans | |
 | Viewer | Overlays for defects, curvature, components, and click-to-pick geodesic isolines; cotan vs intrinsic Delaunay toggle | |
 
 ## Architecture
@@ -103,6 +104,18 @@ Accuracy figures are mean absolute error. Dates, settings and the full tables ar
 | Same grid, intrinsic Delaunay | no negative heat; geodesic error converges (9.9e-3 → 5.9e-3) |
 | Heavily jittered sphere, max \|H − 1\| | cotan 16 → intrinsic Delaunay 2.2 (s = 5) |
 
+## Real intraoral scans (Teeth3DS+ / 3DTeethLand, CC BY-NC-ND 4.0, used locally)
+
+Scans are not redistributed. Only aggregate metrics are reported, with attribution to Ben-Hamadou et al.
+(Teeth3DS+) and the 3DTeethLand challenge.
+
+| Measurement (held-out 3DTeethLand test set: 100 scans, 2,343 cusp landmarks) | Result |
+|---|---|
+| Cusp tips, occlusal prominence (tuned on 67 training scans) | F1 **0.631** at 1 mm (precision 0.553, recall 0.736); median localization error **0.44 mm** |
+| Naive baseline: raw mean-curvature maxima | F1 0.112 at 1 mm (200 detections per scan) |
+| Scan topology (median 106k vertices) | only 9/100 arches are genus 0; handle-loop count = 2·Σg on every scan |
+| Cusp detection time, 93.6k-vertex scan | 383 ms native, 459 ms in the browser (WASM), after a 4-8× optimization (D70) |
+
 ## Performance
 
 Measured 2026-10-05 on an Apple M4 (16 GB). Native: Apple clang 17, CMake Release (-O3). WASM: emsdk 6.0.11
@@ -149,6 +162,8 @@ breakdown comes from `dmw_bench`.
   (D10). Topology diagnostics still work on any mesh.
 - **Handle loops are valid generators, not the shortest in their homology class.** Their lengths are upper bounds
   on handle size (measured 3.5× the tight cycle on a synthetic handle, D64).
+- **Cusp detection over-detects on anterior teeth:** incisal edges score as tips but carry no cusp
+  landmarks. It's the main precision loss, and tooth-type awareness is the next lever (D68).
 - **Boundary conditions:** the heat method uses Neumann conditions only (D48).
 - **OBJ polygons are fan-triangulated,** which is correct for convex polygons only (D16).
 - **The bundle is 622 kB of JavaScript,** mostly Three.js, plus a 267 kB WASM module.

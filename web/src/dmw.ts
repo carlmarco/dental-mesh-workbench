@@ -25,7 +25,8 @@ export interface Stats {
   isolatedVertices: number;
   nonmanifoldVertices: number;
   components: ComponentStats[];
-  handleLoops: { count: number; lengths: number[] }; // shortest first; lengths are upper bounds (D64)
+  handleLoops: { count: number; lengths: number[] };
+  excludedFaces: number; // faces left out of the half-edge analysis view (D69) // shortest first; lengths are upper bounds (D64)
   intrinsicDelaunay: boolean;
   flips: number; // intrinsic edge flips (when intrinsicDelaunay)
   halfedge: { ok: boolean; error: string };
@@ -110,6 +111,14 @@ export class Dmw {
     if (error) throw new Error(error);
     const distance = (this.session.distance() as Float32Array).slice();
     return { distance, millis: performance.now() - t0 };
+  }
+
+  // Cusp tips (detector C, operating point chosen on training scans, D68).
+  detectCusps(): { vertices: Uint32Array; millis: number } {
+    const t0 = performance.now();
+    const error = this.session.detectCusps();
+    if (error) throw new Error(error);
+    return { vertices: (this.session.cusps() as Uint32Array).slice(), millis: performance.now() - t0 };
   }
 
   // embind objects live in C++ memory and are not garbage-collected.

@@ -469,3 +469,45 @@ Each entry: the choice, the alternatives considered, and the reason.
   loops, in 382 ms; the loops visibly cluster at interproximal contacts (qualitative, consistent with fused
   neighbouring crowns).
 - Viewer: "Handle loops" layer and stats; dev-server-only `server.fs.allow: ["../data"]` to open local scans.
+
+## D65. Minimal JSON parser in the core
+- Recursive descent, depth-limited, errors with byte offsets; text in, value out (D14/D15). Used for 3DTeethLand
+  landmarks and Teeth3DS labels. Tested on the landmark shape, escapes, literals, malformed input.
+
+## D66. Point-detection metrics
+- Greedy one-to-one matching by ascending distance within a tolerance; precision, recall, F1, matched distances;
+  micro-averaged across scans. (Not the 3DTeethLand challenge's official metric: not comparable to its leaderboard.)
+
+## D67. Cusp detectors
+- A raw Meyer mean curvature (baseline); B mean curvature diffused to scale sigma; C occlusal prominence
+  p = h - diffuse(h, R) with h the height along the occlusal axis (smallest PCA axis of the arch, signed away from
+  the gingival cut), gated by smoothed H > 0 and h above an arch-height quantile. One-ring local maxima, then NMS
+  (spatial hash). Only the largest component (the arch) is searched. Synthetic tests: Gaussian "cusps" with 10 um
+  roughness: C finds all tips with precision 1 at 0.3 mm, B all tips, A precision < 0.5.
+
+## D68. Cusp evaluation protocol and results (2026-10-05)
+- Tuning: 67 training scans with 3DTeethLand landmarks (66 in Teeth3DS part 1, 1 in the sample); grids widened
+  over 4 sweeps until each optimum was interior (except B's sigma = 3.5 mm at the range edge, +0.007 F1 over 2.5:
+  diminishing returns, stopped). Chosen by F1 at 1 mm on training: A thr 2.0/nms 2.0 (0.101); B sigma 3.5/thr
+  0.15/nms 4.0 (0.596); C sigma 0.5/R 4.0/q 0.5/thr 1.3/nms 3.5 (0.663).
+- **Held-out test (100 scans = 3DTeethLand test set, 2,343 Cusp landmarks), run once with the fixed points:**
+  A: P 0.062 R 0.534 F1@1mm 0.112 (200 detections/scan); B: P 0.521 R 0.656 F1@1mm 0.581, median error 0.51 mm;
+  **C: P 0.553 R 0.736 F1@0.5/1/2mm 0.368/0.631/0.744, median error 0.44 mm**, 31.2 detections/scan (truth: 23.4).
+  Train-to-test gap for C: 0.663 -> 0.631. The library path (detect_cusps) reproduces the sweep path exactly.
+- Visible failure mode: false positives on incisal edges of anterior teeth, which carry no Cusp landmarks.
+  Tooth-type awareness (margin/segmentation, or ML) is the obvious next lever for precision.
+
+## D69. Manifold analysis view (supersedes the reject-whole-scan behaviour of D10 for real data)
+- `manifold_analysis_mesh`: iteratively excludes invalid/duplicate faces and faces touching non-manifold or
+  misoriented edges or non-manifold vertices until the half-edge build succeeds; returns the built structure.
+  Measured: training scans with half-edge failures 22/67 -> 0/67; test scans 3/100 -> 0/100. The topology report
+  still describes the full input; the viewer reports the excluded-face count.
+
+## D70. Cusp detector speed: solve for prominence directly, at a measured tolerance
+- (*0 - tL) p = -t L h instead of reconstructing the diffused height field: at loose tolerance this is far more
+  accurate (full-field at 1e-4 was off by 1.5 mm vs 5e-4 mm for the direct solve), because CG's tolerance is
+  relative to the right-hand side, which is now small (same lesson as D47, from the other side).
+- Tolerance 1e-4 for the detector's solves: max prominence error 5.2e-4 mm against a 1e-11 reference (threshold
+  1.3 mm; scanner accuracy 10-90 um per the Teeth3DS+ paper).
+- Measured on a 93.6k-vertex scan: native detect_cusps 1,525 -> 383 ms (4.0x); in the browser (WASM)
+  3,685 -> 459 ms (8x). Held-out test metrics identical to 3 decimals after the change.

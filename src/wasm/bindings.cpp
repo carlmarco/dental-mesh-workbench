@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/curvature.h"
+#include "core/cusps.h"
 #include "core/generate.h"
 #include "core/geodesic.h"
 #include "core/halfedge.h"
@@ -87,7 +88,17 @@ public:
     val nonmanifoldEdges() const { return view(nonmanifold_edges_); }
     val misorientedEdges() const { return view(misoriented_edges_); }
     val nonmanifoldVertices() const { return view(topo_.nonmanifold_vertices); }
-    val handleEdges() const { return view(handle_edges_); }  // uint32 vertex pairs of all handle loops
+    val handleEdges() const { return view(handle_edges_); }
+
+    // Cusp tips with detector C at the operating point chosen on the training set (D68).
+    std::string detectCusps() {
+        if (!he_mesh_) return "cusp detection needs a manifold analysis view (" + he_error_ + ")";
+        CuspParams p;  // occlusal prominence
+        p.curvature_scale = 0.5, p.prominence_scale = 4.0, p.height_quantile = 0.5, p.threshold = 1.3, p.nms_radius = 3.5;
+        cusps_ = detect_cusps(*he_mesh_, p).vertices;
+        return {};
+    }
+    val cusps() const { return view(cusps_); }  // uint32 vertex ids, strongest first  // uint32 vertex pairs of all handle loops
 
     // Switch curvature and geodesics between the cotan and the intrinsic Delaunay Laplacian.
     void setIntrinsicDelaunay(bool on) {
@@ -150,6 +161,7 @@ public:
         o << "],\"handleLoops\":{\"count\":" << handle_lengths_.size() << ",\"lengths\":[";
         for (std::size_t i = 0; i < handle_lengths_.size() && i < 64; ++i) o << (i ? "," : "") << handle_lengths_[i];
         o << "]}";
+        o << ",\"excludedFaces\":" << excluded_faces_;
         o << ",\"intrinsicDelaunay\":" << (intrinsic_delaunay_ ? "true" : "false")
           << ",\"flips\":" << curvature_.intrinsic_flips << ",\"halfedge\":{\"ok\":" << (he_error_.empty() ? "true" : "false") << ",\"error\":\""
           << json_escape(he_error_) << "\"},\"curvature\":";
@@ -172,13 +184,18 @@ private:
     void set_mesh(TriMesh m) {
         mesh_ = std::move(m);
         topo_ = analyze_topology(mesh_);
-        // Collapsed/duplicate faces are reported by topology and excluded here (D63); only genuinely
-        // non-manifold input still fails (D10), in which case there is no curvature.
-        auto he = build_halfedge(without_excluded_faces(mesh_, topo_));
+        // Analysis view (D63, D69): faces at reported defects are excluded so the half-edge-based
+        // algorithms run on real scans; the topology report above still describes the full input.
+        AnalysisMesh analysis = manifold_analysis_mesh(mesh_);
+        excluded_faces_ = analysis.excluded_faces;
+        BuildResult he;
+        if (analysis.manifold) he.mesh = std::move(analysis.halfedge);
+        else he.error = "not a manifold even after excluding faces at defects";
         he_error_ = he.error;
         geodesics_.reset();  // rebuilt lazily for each new mesh
         he_mesh_ = he.ok() ? std::make_unique<HalfEdgeMesh>(std::move(he.mesh)) : nullptr;
         distance_.clear();
+        cusps_.clear();
         update_curvature();
         // Handle loops (M8b): 2g generator cycles per component, shortest first (lengths are upper
         // bounds on handle size, D64). Stored as line segments for the viewer.
@@ -230,6 +247,7 @@ private:
     }
 
     bool intrinsic_delaunay_ = false;
+    std::size_t excluded_faces_ = 0;
     TriMesh mesh_;
     TopologyReport topo_;
     std::string he_error_;
@@ -241,6 +259,7 @@ private:
     std::vector<std::uint32_t> indices_, face_component_, boundary_edges_, nonmanifold_edges_,
         misoriented_edges_, handle_edges_;
     std::vector<double> handle_lengths_;
+    std::vector<std::uint32_t> cusps_;
 };
 
 }  // namespace
@@ -260,6 +279,8 @@ EMSCRIPTEN_BINDINGS(dmw) {
         .function("misorientedEdges", &Session::misorientedEdges)
         .function("nonmanifoldVertices", &Session::nonmanifoldVertices)
         .function("handleEdges", &Session::handleEdges)
+        .function("detectCusps", &Session::detectCusps)
+        .function("cusps", &Session::cusps)
         .function("setIntrinsicDelaunay", &Session::setIntrinsicDelaunay)
         .function("geodesic", &Session::geodesic)
         .function("distance", &Session::distance)

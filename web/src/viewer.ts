@@ -15,6 +15,7 @@ export interface Layers {
   misoriented: boolean;
   vertices: boolean;
   handles: boolean;
+  cusps: boolean;
   wireframe: boolean;
 }
 
@@ -24,6 +25,8 @@ export const LAYER_COLORS = {
   misoriented: 0xf2a900,
   vertices: 0xc026d3,
   handles: 0x16a34a,
+  cusps: 0xf97316,
+  truth: 0x22d3ee,
 } as const;
 
 const EXCLUDED = 0xffffffff;
@@ -61,6 +64,8 @@ export class Viewer {
   private lineMaterials: LineMaterial[] = [];
   private data: MeshData | null = null;
   private distance: Float32Array | null = null;
+  private cuspPoints: Float32Array | null = null;  // detected tips, xyz
+  private truthPoints: Float32Array | null = null; // loaded landmarks, xyz
   private source: number | null = null;
   private surface: THREE.Mesh | null = null;
   private readonly isolines = isolineTexture();
@@ -109,6 +114,11 @@ export class Viewer {
     const range = this.rebuild(overlay, layers);
     this.frame();
     return range;
+  }
+
+  setCusps(detected: Float32Array | null, truth: Float32Array | null): void {
+    this.cuspPoints = detected;
+    this.truthPoints = truth;
   }
 
   // Distance field for the "geodesic" overlay (null clears it).
@@ -195,6 +205,8 @@ export class Viewer {
     if (layers.misoriented) this.addEdges(d.misorientedEdges, LAYER_COLORS.misoriented, 4, true);
     if (layers.nonmanifold) this.addEdges(d.nonmanifoldEdges, LAYER_COLORS.nonmanifold, 5, true);
     if (layers.handles) this.addEdges(d.handleEdges, LAYER_COLORS.handles, 4, true);
+    if (layers.cusps && this.cuspPoints?.length) this.addXyzPoints(this.cuspPoints, LAYER_COLORS.cusps, 11);
+    if (layers.cusps && this.truthPoints?.length) this.addXyzPoints(this.truthPoints, LAYER_COLORS.truth, 7);
     if (overlay === "geodesic" && this.source !== null) {
       this.addPoints(Uint32Array.of(this.source), 0xffffff, 14);
     }
@@ -216,6 +228,14 @@ export class Viewer {
     ids.forEach((v, i) => pts.set(d.positions.subarray(3 * v, 3 * v + 3), 3 * i));
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pts, 3));
+    const m = new THREE.PointsMaterial({ color, size, sizeAttenuation: false });
+    m.depthTest = false;
+    this.content.add(new THREE.Points(g, m));
+  }
+
+  private addXyzPoints(xyz: Float32Array, color: number, size: number): void {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(xyz, 3));
     const m = new THREE.PointsMaterial({ color, size, sizeAttenuation: false });
     m.depthTest = false;
     this.content.add(new THREE.Points(g, m));
