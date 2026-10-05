@@ -2,7 +2,7 @@ import "./style.css";
 
 import { categorical } from "./colormap.ts";
 import { Dmw, type MeshData, type Preset, PRESETS, type Stats } from "./dmw.ts";
-import { LAYER_COLORS, type Layers, type Overlay, Viewer } from "./viewer.ts";
+import { ISOLINES, LAYER_COLORS, type Layers, type Overlay, Viewer } from "./viewer.ts";
 
 const LABELS: Record<Preset, string> = {
   plate_handle: "Plate with a handle (genus 1)",
@@ -25,6 +25,7 @@ const view = byId<HTMLElement>("view");
 const dmw = await Dmw.create();
 const viewer = new Viewer(view);
 let data: MeshData | null = null;
+let geodesicInfo = ""; // legend text for the current distance field
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
 const rgb = ([r, g, b]: number[]) => `rgb(${r * 255}, ${g * 255}, ${b * 255})`;
@@ -44,9 +45,30 @@ function layers(): Layers {
   return { boundary: on("boundary"), nonmanifold: on("nonmanifold"), misoriented: on("misoriented"), vertices: on("vertices"), wireframe: on("wireframe") };
 }
 
+// Heat-method distance from `source`; the first query on a mesh also factors the solver.
+function computeGeodesic(source: number): boolean {
+  try {
+    const first = geodesicInfo === "";
+    const g = dmw.geodesic(source);
+    viewer.setGeodesic(g.distance, source);
+    geodesicInfo = `Source: vertex ${source}. ${first ? "Factor + solve" : "Solve (reusing factorization)"}: ${g.millis.toFixed(1)} ms.`;
+    return true;
+  } catch (e) {
+    errorBox.textContent = (e as Error).message;
+    return false;
+  }
+}
+
 function display(d: MeshData, keepCamera: boolean): void {
+  if (d !== data) {
+    viewer.setGeodesic(null, null); // a new mesh invalidates the distance field
+    geodesicInfo = "";
+  }
   data = d;
   errorBox.textContent = "";
+  if (overlay() === "geodesic" && geodesicInfo === "" && !computeGeodesic(0)) {
+    document.querySelector<HTMLInputElement>('input[name="overlay"][value="shaded"]')!.checked = true;
+  }
   const range = keepCamera ? viewer.restyle(overlay(), layers()) : viewer.show(d, overlay(), layers());
   renderLegend(range);
   renderStats(d.stats, d.millis);
@@ -64,6 +86,12 @@ function renderLegend(range: number | null): void {
   const legend = byId<HTMLDivElement>("legend");
   if (range === null) {
     legend.innerHTML = "";
+    return;
+  }
+  if (overlay() === "geodesic") {
+    legend.innerHTML = `<div class="ramp seq"></div>
+      <div class="ramp-labels"><span>0</span><span>${fmt(range)}</span></div>
+      <div>${ISOLINES} isolines, spacing ${fmt(range / ISOLINES)}. ${esc(geodesicInfo)} Click the surface to move the source.</div>`;
     return;
   }
   legend.innerHTML = `<div class="ramp"></div>
@@ -96,7 +124,9 @@ function renderStats(s: Stats, millis: number): void {
         <dt>K range</dt><dd>${s.curvature.gaussianRange ? s.curvature.gaussianRange.map(fmt).join(" … ") : "–"}</dd>
         <dt>Zero-area faces</dt><dd>${s.curvature.degenerateFaces}</dd>
       </dl>`
-    : `<p class="flag">Unavailable: the half-edge build rejected this mesh (${esc(s.halfedge.error)}). Curvature needs a manifold.</p>`;
+    : `<p class="flag">Not computed: the half-edge build rejected this mesh (${esc(s.halfedge.error)}).
+        The curvature code needs a manifold with consistent orientation. Gray in the curvature views means
+        "no data", not zero.</p>`;
 
   byId<HTMLDivElement>("stats").innerHTML = `
     <h2>Mesh</h2>
@@ -135,6 +165,10 @@ view.addEventListener("drop", (e) => {
   const f = e.dataTransfer?.files[0];
   if (f) void openFile(f);
 });
+viewer.onPick = (v) => {
+  if (overlay() !== "geodesic" || !data) return;
+  if (computeGeodesic(v)) display(data, true);
+};
 for (const input of document.querySelectorAll<HTMLInputElement>("#overlay input, #layers input")) {
   input.addEventListener("change", () => data && display(data, true));
 }

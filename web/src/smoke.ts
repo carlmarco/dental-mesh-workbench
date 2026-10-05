@@ -24,6 +24,14 @@ assert.deepEqual(Array.from(defects.nonmanifoldVertices), [24]);
 assert.equal(defects.stats.halfedge.ok, false); // non-manifold: no curvature (D10)
 assert.equal(defects.stats.curvature, null);
 
+// Heat-method geodesics through WASM: icosahedron vertices 0 and 3 are antipodal on the
+// unit sphere, so their distance is pi (measured heat error at this resolution: < 3e-2).
+dmw.generate("icosphere");
+const geo = dmw.geodesic(0);
+close(geo.distance[0], 0, 1e-12);
+close(geo.distance[3], Math.PI, 5e-2);
+assert.throws(() => (dmw.generate("defects"), dmw.geodesic(0)), /manifold/);
+
 // The shared-memory input path: a binary STL tetrahedron built byte by byte.
 const tris = [
   [0, 0, 0, 0, 1, 0, 1, 0, 0],
@@ -45,4 +53,4 @@ assert.equal(obj.stats.components[0].b, 1);
 assert.throws(() => dmw.loadFile(new TextEncoder().encode("f 1 2 3\n"), "obj"), /line 1/);
 
 dmw.dispose();
-console.log("smoke ok: WASM topology, curvature and STL/OBJ input match the native results");
+console.log("smoke ok: WASM topology, curvature and STL/OBJ input match the native results; geodesics OK");

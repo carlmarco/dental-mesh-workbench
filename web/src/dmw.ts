@@ -92,6 +92,16 @@ export class Dmw {
     });
   }
 
+  // Heat-method distance from one vertex. The first call on a mesh also builds and factors
+  // the solver, so it is slower; later calls reuse the factorization.
+  geodesic(source: number): { distance: Float32Array; millis: number } {
+    const t0 = performance.now();
+    const error = this.session.geodesic(source);
+    if (error) throw new Error(error);
+    const distance = (this.session.distance() as Float32Array).slice();
+    return { distance, millis: performance.now() - t0 };
+  }
+
   // embind objects live in C++ memory and are not garbage-collected.
   dispose(): void {
     this.session.delete();

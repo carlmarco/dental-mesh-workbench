@@ -70,6 +70,7 @@ i[data-swatch] { width: 14px; height: 4px; border-radius: 2px; display: inline-b
 
 #legend { margin-top: 8px; font-size: 12px; color: var(--muted); }
 .ramp { height: 10px; border-radius: 3px; background: linear-gradient(90deg, rgb(59,76,192), rgb(235,235,235), rgb(180,4,38)); }
+.ramp.seq { background: linear-gradient(90deg, rgb(68,1,84), rgb(33,145,140), rgb(253,231,37)); }
 .ramp-labels { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
 
 #error { color: var(--danger); min-height: 0; margin: 10px 0 0; }

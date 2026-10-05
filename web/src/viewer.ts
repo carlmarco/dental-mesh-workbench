@@ -4,10 +4,10 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 
-import { categorical, diverging, NO_DATA, robustRange, type RGB } from "./colormap.ts";
+import { categorical, diverging, NO_DATA, robustRange, type RGB, sequential } from "./colormap.ts";
 import type { MeshData } from "./dmw.ts";
 
-export type Overlay = "shaded" | "mean" | "gaussian" | "components";
+export type Overlay = "shaded" | "mean" | "gaussian" | "components" | "geodesic";
 
 export interface Layers {
   boundary: boolean;
@@ -26,6 +26,28 @@ export const LAYER_COLORS = {
 
 const EXCLUDED = 0xffffffff;
 const SHADED: RGB = [0.72, 0.75, 0.8];
+export const ISOLINES = 20; // isolines drawn at multiples of (max distance / ISOLINES)
+
+// 1D texture: sequential colors with a dark band at each isoline. Used with a texture
+// coordinate u = distance / max: u interpolates linearly across each triangle and the texture
+// is sampled per pixel, so isolines stay crisp even on coarse meshes (per-vertex colors would
+// smear them across whole triangles).
+function isolineTexture(): THREE.DataTexture {
+  const width = 1024;
+  const data = new Uint8Array(width * 4);
+  for (let i = 0; i < width; ++i) {
+    const u = i / (width - 1);
+    const line = Math.abs(u * ISOLINES - Math.round(u * ISOLINES)) < 0.06;
+    const [r, g, b] = sequential(u).map((c) => (line ? c * 0.35 : c));
+    data.set([r * 255, g * 255, b * 255, 255], 4 * i);
+  }
+  const tex = new THREE.DataTexture(data, width, 1);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
 
 export class Viewer {
   private readonly renderer: THREE.WebGLRenderer;
@@ -36,6 +58,11 @@ export class Viewer {
   private readonly container: HTMLElement;
   private lineMaterials: LineMaterial[] = [];
   private data: MeshData | null = null;
+  private distance: Float32Array | null = null;
+  private source: number | null = null;
+  private surface: THREE.Mesh | null = null;
+  private readonly isolines = isolineTexture();
+  onPick: ((vertex: number) => void) | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -52,6 +79,15 @@ export class Viewer {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+
+    // Click (press and release without dragging) picks the nearest vertex of the hit face.
+    let down: { x: number; y: number } | null = null;
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener("pointerdown", (e) => (down = { x: e.clientX, y: e.clientY }));
+    canvas.addEventListener("pointerup", (e) => {
+      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5) this.pick(e);
+      down = null;
+    });
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -73,6 +109,12 @@ export class Viewer {
     return range;
   }
 
+  // Distance field for the "geodesic" overlay (null clears it).
+  setGeodesic(distance: Float32Array | null, source: number | null): void {
+    this.distance = distance;
+    this.source = source;
+  }
+
   // Same mesh, different overlay/layers: keep the camera where the user put it.
   restyle(overlay: Overlay, layers: Layers): number | null {
     return this.data ? this.rebuild(overlay, layers) : null;
@@ -86,7 +128,18 @@ export class Viewer {
     // Mesh. Per-face coloring (components) needs non-indexed geometry, since an indexed
     // vertex is shared by faces of different colors; per-vertex fields stay indexed.
     const geometry = new THREE.BufferGeometry();
-    if (overlay === "components") {
+    let map: THREE.Texture | null = null;
+    if (overlay === "geodesic" && this.distance) {
+      let max = 0;
+      for (const x of this.distance) if (Number.isFinite(x)) max = Math.max(max, x);
+      range = max;
+      const uv = new Float32Array((d.positions.length / 3) * 2);
+      this.distance.forEach((x, v) => uv.set([Number.isFinite(x) && max > 0 ? Math.max(0, x) / max : 0, 0.5], 2 * v));
+      geometry.setAttribute("position", new THREE.BufferAttribute(d.positions, 3));
+      geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+      geometry.setIndex(new THREE.BufferAttribute(d.indices, 1));
+      map = this.isolines;
+    } else if (overlay === "components") {
       const nf = d.indices.length / 3;
       const pos = new Float32Array(nf * 9);
       const col = new Float32Array(nf * 9);
@@ -115,7 +168,8 @@ export class Viewer {
     }
     geometry.computeVertexNormals();
     const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
+      vertexColors: map === null,
+      map,
       side: THREE.DoubleSide, // open meshes show their back faces
       roughness: 0.65,
       metalness: 0.0,
@@ -123,7 +177,8 @@ export class Viewer {
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
-    this.content.add(new THREE.Mesh(geometry, material));
+    this.surface = new THREE.Mesh(geometry, material);
+    this.content.add(this.surface);
 
     if (layers.wireframe) {
       const wire = new THREE.LineSegments(
@@ -137,6 +192,9 @@ export class Viewer {
     if (layers.boundary) this.addEdges(d.boundaryEdges, LAYER_COLORS.boundary, 2.5, false);
     if (layers.misoriented) this.addEdges(d.misorientedEdges, LAYER_COLORS.misoriented, 4, true);
     if (layers.nonmanifold) this.addEdges(d.nonmanifoldEdges, LAYER_COLORS.nonmanifold, 5, true);
+    if (overlay === "geodesic" && this.source !== null) {
+      this.addPoints(Uint32Array.of(this.source), 0xffffff, 14);
+    }
     if (layers.vertices && d.nonmanifoldVertices.length > 0) {
       const pts = new Float32Array(d.nonmanifoldVertices.length * 3);
       d.nonmanifoldVertices.forEach((v, i) => pts.set(d.positions.subarray(3 * v, 3 * v + 3), 3 * i));
@@ -147,6 +205,37 @@ export class Viewer {
       this.content.add(new THREE.Points(g, m));
     }
     return range;
+  }
+
+  private addPoints(ids: Uint32Array, color: number, size: number): void {
+    const d = this.data!;
+    const pts = new Float32Array(ids.length * 3);
+    ids.forEach((v, i) => pts.set(d.positions.subarray(3 * v, 3 * v + 3), 3 * i));
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pts, 3));
+    const m = new THREE.PointsMaterial({ color, size, sizeAttenuation: false });
+    m.depthTest = false;
+    this.content.add(new THREE.Points(g, m));
+  }
+
+  private pick(e: PointerEvent): void {
+    if (!this.surface || !this.data || !this.onPick) return;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const hit = ray.intersectObject(this.surface)[0];
+    if (!hit?.face) return;
+    // Non-indexed geometry (components view) numbers corners, not vertices: map back.
+    const corner = (c: number) => (this.surface!.geometry.index ? c : this.data!.indices[c]);
+    let best = -1, bestDist = Infinity;
+    for (const c of [hit.face.a, hit.face.b, hit.face.c]) {
+      const v = corner(c);
+      const p = this.data.positions;
+      const dist = hit.point.distanceToSquared(new THREE.Vector3(p[3 * v], p[3 * v + 1], p[3 * v + 2]));
+      if (dist < bestDist) (best = v), (bestDist = dist);
+    }
+    if (best >= 0) this.onPick(best);
   }
 
   private addEdges(pairs: Uint32Array, color: number, width: number, onTop: boolean): void {
@@ -185,10 +274,11 @@ export class Viewer {
         any.geometry?.dispose(); // GPU buffers are not garbage-collected either
         const mat = any.material as THREE.Material | THREE.Material[] | undefined;
         if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-        else mat?.dispose();
+        else mat?.dispose(); // (disposing a material does not dispose its shared map texture)
       });
     }
     this.lineMaterials = [];
+    this.surface = null;
   }
 
   private resize(): void {

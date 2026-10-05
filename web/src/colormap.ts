@@ -40,3 +40,17 @@ const PALETTE: RGB[] = [
 export function categorical(i: number): RGB {
   return PALETTE[i % PALETTE.length];
 }
+
+// Sequential map for non-negative quantities (distance): dark blue -> teal -> yellow,
+// perceptually ordered (control points approximate the viridis endpoints and midpoint).
+const SEQ: RGB[] = [
+  [0.267, 0.005, 0.329],
+  [0.128, 0.567, 0.551],
+  [0.993, 0.906, 0.144],
+];
+export function sequential(t: number): RGB {
+  const s = Math.max(0, Math.min(1, t)) * (SEQ.length - 1);
+  const i = Math.min(SEQ.length - 2, Math.floor(s)), u = s - i;
+  const a = SEQ[i], b = SEQ[i + 1];
+  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
+}

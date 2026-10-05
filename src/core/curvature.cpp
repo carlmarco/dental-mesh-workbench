@@ -1,4 +1,5 @@
 #include "core/curvature.h"
+#include "detail/vec.h"
 
 #include <cmath>
 #include <cstddef>
@@ -8,22 +9,11 @@
 namespace dmw {
 namespace {
 
+using namespace detail;
+
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 constexpr double kPi = std::numbers::pi;
 
-Vec3 operator-(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
-Vec3& operator+=(Vec3& a, const Vec3& b) {
-    a.x += b.x;
-    a.y += b.y;
-    a.z += b.z;
-    return a;
-}
-Vec3 operator*(double s, const Vec3& a) { return {s * a.x, s * a.y, s * a.z}; }
-double dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-Vec3 cross(const Vec3& a, const Vec3& b) {
-    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
-double norm(const Vec3& a) { return std::sqrt(dot(a, a)); }
 
 }  // namespace
 

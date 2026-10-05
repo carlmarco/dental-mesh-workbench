@@ -277,3 +277,62 @@ Each entry: the choice, the alternatives considered, and the reason.
   STL/OBJ byte paths against the values the native tests establish.
 - **Verified in the browser (2026-10-05):** plate with handle (chi -1, b 1, g 1, only the outer rim highlighted),
   defect showcase overlays, torus Gaussian curvature sign pattern; no console errors.
+
+## D45. DEC operators (M6)
+- d0 (signed vertex-edge incidence), d1 (signed edge-face incidence), *0 (barycentric lumped areas), *1
+  ((cot a + cot b)/2), L = -d0^T *1 d0 assembled as a weighted Gram product. Tests: d1 d0 = 0 exactly, L 1 = 0,
+  L symmetric NSD, linear precision on flat irregular meshes, div(grad u) = L u exactly, and L x = -A K(x)
+  matching M4's independent implementation to 1e-12.
+
+## D46. Hand-written CSR + Jacobi-preconditioned CG
+- As the original brief specified ("hand-written conjugate gradient first").
+
+## D47. FINDING: CG cannot solve the heat step accurately enough at t = h^2 (measured 2026-10-05)
+- Heat-method error grew under refinement with CG at relative tolerance 1e-10 (icosphere mean error 2.3e-2 at
+  s=3 but 6.5e-1 at s=5, 1.09 at s=6; grid likewise beyond n=64), while Dijkstra stayed ~1.2e-1.
+- Cause: one backward-Euler heat step decays roughly like exp(-d/sqrt(t)) = exp(-d/h); far vertices have u many
+  orders of magnitude below CG's residual tolerance, so u there is solver noise, and step II normalizes noise into
+  arbitrary directions.
+- Evidence (icosphere s=4, same matrix): CG 1e-10 -> 841/2562 vertices with u <= 0, distance error mean 1.4e-1,
+  max 1.2; CG 1e-14 -> 106 such vertices, mean 1.8e-2, max 3.9e-1; dense Cholesky -> 0 such vertices, mean
+  1.3e-2, max 2.9e-2. Larger t (m = 16) also hides it (mean 5.1e-3 at s=5) but gives up t ~ h^2 convergence.
+- Conclusion: the heat step needs a direct (factorization) solver. Decision on how: D49.
+
+## D49. Direct solver: hand-written envelope LDL^T with reverse Cuthill-McKee ordering (author's choice)
+- **Alternatives:** Eigen SimplicialLDLT (AMD ordering; fast at 40k+ vertices, MPL2 dependency); keep CG with a
+  larger t (gives up convergence).
+- **Reason:** no dependency and fully explainable; factor once, two triangular solves per query (the paper's
+  prefactorization). Envelope fill is O(n * bandwidth), roughly n^1.5 on surface meshes: fine for viewer-size
+  meshes, heavy beyond ~40k vertices. Eigen remains the upgrade path.
+- The Poisson matrix -L is made SPD by pinning one vertex per connected component (phi = 0 there; exact, since
+  the system is consistent and phi is shifted afterwards). Vertices without faces get a decoupled unit diagonal.
+
+## D48. Heat method: Neumann boundary conditions, t = m h^2 with m = 1, h = mean edge length
+- Neumann (natural) conditions come for free with the cotan Laplacian. The paper also discusses Dirichlet and
+  an average of the two near boundaries; not implemented (open).
+
+## D50. Measured accuracy of the heat method (2026-10-05, Apple clang 17 -O2 probe, source vertex 5)
+- Icosphere r = 1, mean / max |error| vs great-circle distance, heat vs Dijkstra-on-edges:
+  s=2: 4.5e-2 / 9.7e-2 vs 1.1e-1; s=3: 2.3e-2 / 5.1e-2 vs 1.2e-1; s=4: 1.3e-2 / 2.9e-2 vs 1.2e-1;
+  s=5: 8.7e-3 / 1.9e-2 vs 1.2e-1; s=6: 6.5e-3 / 1.4e-2 vs 1.2e-1. Dijkstra does not converge.
+- Observed heat convergence rate slows with refinement (~0.96, 0.81, 0.61, 0.42 per level). Cause not yet
+  identified (candidates: source singularity, far-field heat precision). Open.
+- Flat unit grid, source at center, vs Euclidean: heat mean 2.2e-2 (n=8) -> 4.4e-3 (n=128); Dijkstra ~7e-2.
+- Jittered (0.25h) icosphere: heat mean 2.9e-2 (s=3) -> 1.0e-2 (s=6): irregularity no longer breaks it.
+- Larger t at s=5: m=0.25 -> 1.7e-2, m=1 -> 8.7e-3, m=4 -> 5.8e-3, m=16 -> 5.1e-3 (mean); on this smooth closed
+  surface, more smoothing helped.
+- Cost (native): envelope factor entries / setup / query: s=4 0.35M / 78 ms / 5 ms; s=5 2.7M / 0.49 s / 28 ms;
+  s=6 21.9M / 4.9 s / 172 ms. Browser (WASM), plate with handle, 381 vertices: first query (factor + solve)
+  4.7 ms, later queries 0.3 ms.
+- Mutation check (D26): pinned rhs not zeroed -> 1/95 fail (only the non-pinned-source test, added for it);
+  X not negated -> 4/95; *1 wrong corner -> 7/95; d1 sign ignored -> 1/95; LDL^T overlap sum dropped -> 6/95.
+  The harness now aborts if a mutant fails to build (an earlier run silently re-tested the old binary).
+
+## D51. Geodesic distance in the viewer
+- Session builds HeatGeodesics lazily on the first query and keeps the half-edge mesh on the heap (the solver
+  holds a pointer to it). Click picks the nearest vertex of the hit face. Isolines via a 1D striped texture
+  indexed by distance / max (interpolated per pixel, so lines stay crisp).
+- Fixed: a uint32 -> iterator offset in SparseMatrix::at() broke only the wasm32 build (-Wsign-conversion,
+  32-bit difference_type).
+- Viewer message for meshes without half-edge structure now says "consistently oriented manifold" and that gray
+  means no data (the Moebius strip was being read as "curvature ~ 0").

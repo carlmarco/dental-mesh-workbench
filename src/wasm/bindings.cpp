@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <span>
 #include <sstream>
 #include <string>
@@ -13,6 +14,7 @@
 
 #include "core/curvature.h"
 #include "core/generate.h"
+#include "core/geodesic.h"
 #include "core/halfedge.h"
 #include "core/io.h"
 #include "core/topology.h"
@@ -84,6 +86,22 @@ public:
     val misorientedEdges() const { return view(misoriented_edges_); }
     val nonmanifoldVertices() const { return view(topo_.nonmanifold_vertices); }
 
+    // Heat-method distance from one vertex (D51). The solver (and its two factorizations) is
+    // built on the first query and reused for every later one on the same mesh.
+    std::string geodesic(std::uint32_t source) {
+        if (!he_mesh_) return "geodesic distance needs a consistently oriented manifold (" + he_error_ + ")";
+        if (!geodesics_) {
+            geodesics_ = std::make_unique<HeatGeodesics>(*he_mesh_);
+            if (!geodesics_->ok()) return geodesics_->error();
+        }
+        const std::uint32_t src[1] = {source};
+        const GeodesicResult r = geodesics_->distance(src);
+        if (!r.ok()) return r.error;
+        distance_.assign(r.distance.begin(), r.distance.end());  // double -> float, NaN preserved
+        return {};
+    }
+    val distance() const { return view(distance_); }  // float32 per vertex, NaN = unreachable
+
     // Summary as JSON (built by hand: no dependency for one small object; finite numbers only).
     std::string stats() const {
         std::ostringstream o;
@@ -142,6 +160,11 @@ private:
         auto he = build_halfedge(mesh_);  // fails on non-manifold input (D10): no curvature then
         he_error_ = he.error;
         curvature_ = he.ok() ? compute_curvature(he.mesh) : CurvatureField{};
+        // HeatGeodesics keeps a pointer to the mesh, so the mesh lives on the heap, where it
+        // can't move; the solver is rebuilt lazily for each new mesh.
+        geodesics_.reset();
+        he_mesh_ = he.ok() ? std::make_unique<HalfEdgeMesh>(std::move(he.mesh)) : nullptr;
+        distance_.clear();
 
         // GPU-facing buffers: float32 positions (D12: double in the core, float at the GPU).
         positions_.clear();
@@ -178,6 +201,9 @@ private:
     TopologyReport topo_;
     std::string he_error_;
     CurvatureField curvature_;
+    std::unique_ptr<HalfEdgeMesh> he_mesh_;
+    std::unique_ptr<HeatGeodesics> geodesics_;
+    std::vector<float> distance_;
     std::vector<float> positions_, mean_, gaussian_;
     std::vector<std::uint32_t> indices_, face_component_, boundary_edges_, nonmanifold_edges_,
         misoriented_edges_;
@@ -199,5 +225,7 @@ EMSCRIPTEN_BINDINGS(dmw) {
         .function("nonmanifoldEdges", &Session::nonmanifoldEdges)
         .function("misorientedEdges", &Session::misorientedEdges)
         .function("nonmanifoldVertices", &Session::nonmanifoldVertices)
+        .function("geodesic", &Session::geodesic)
+        .function("distance", &Session::distance)
         .function("stats", &Session::stats);
 }
