@@ -1,0 +1,72 @@
+# Native tests, WASM build + cross-target smoke test, and GitHub Pages deployment (D59).
+# Pages: in the repo settings, set Pages -> Source to "GitHub Actions".
+name: CI and Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure (Release)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -j 4
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
+      - name: Install emsdk 6.0.11 (pinned, D5)
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install 6.0.11
+          "$HOME/emsdk/emsdk" activate 6.0.11
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Build WASM
+        working-directory: web
+        run: npm run build:wasm
+      - name: Typecheck and cross-target smoke test
+        working-directory: web
+        run: |
+          npm run typecheck
+          npm run smoke
+      - name: Build site
+        working-directory: web
+        run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist
+
+  deploy:
+    needs: [native, web]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

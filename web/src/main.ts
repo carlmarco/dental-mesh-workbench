@@ -181,6 +181,8 @@ idt.addEventListener("change", () => {
     errorBox.textContent = (e as Error).message;
   }
 });
+// A real <button> is focusable and keyboard-operable; it forwards to the hidden file input.
+byId<HTMLButtonElement>("open").addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => fileInput.files?.[0] && openFile(fileInput.files[0]));
 view.addEventListener("dragover", (e) => e.preventDefault());
 view.addEventListener("drop", (e) => {

@@ -14,7 +14,8 @@
         <h2>Mesh</h2>
         <select id="preset" aria-label="Preset mesh"></select>
         <div class="row">
-          <label class="button">Open STL / OBJ<input type="file" id="file" accept=".stl,.obj" hidden /></label>
+          <button type="button" class="button" id="open">Open STL / OBJ</button>
+          <input type="file" id="file" accept=".stl,.obj" hidden />
           <label class="inline">weld ε <input id="weld" type="number" value="0" min="0" step="any" /></label>
         </div>
         <p class="hint">or drop a file on the view</p>

@@ -385,3 +385,26 @@ Each entry: the choice, the alternatives considered, and the reason.
 - Harness lessons: per-test timeouts (mutants can hang); a killed run leaves the mutant on disk (restore from the
   saved copy); make's 1-second timestamp comparison can leave a stale object, so the harness must verify the
   mutated file was actually recompiled.
+
+## D57. Benchmarks
+- `tools/dmw_bench` (native, Release build directory, median of repeated runs) times each stage on icospheres
+  s=3..7 and writes them as binary STL; `web/src/bench.ts` times the WASM build on the same files under Node.
+  `write_obj` (17 significant digits, round-trips doubles exactly) and `write_stl_binary` added, round-trip
+  tested. The full test suite also passes in the Release build (UB that only appears under -O3 would show).
+- Results (2026-10-05, Apple M4 16 GB, Apple clang 17 -O3; WASM emsdk 6.0.11, Node 26.10) are in README.md.
+
+## D58. FINDING (corrected): Emscripten link flags
+- I first concluded the WASM module was linked without optimization (CMAKE_EXE_LINKER_FLAGS_RELEASE is empty) and
+  added -O3 at link. The output was byte-identical: link.txt shows CMake already passes CMAKE_CXX_FLAGS_RELEASE
+  (-O3) on the em++ link line. Change reverted. Also measured: WASM memory growth is not the cause of the 4.3x
+  WASM/native gap at 164k vertices (later runs grow the heap less yet take the same time). Cause open.
+
+## D59. Publishing: MIT license, GitHub Pages workflow (author's choices)
+- `.github/workflows/ci.yml`: native Release build + ctest (clang on ubuntu), pinned emsdk 6.0.11 + WASM build +
+  typecheck + Node smoke test + Vite build, then Pages deploy on pushes to main. Action versions: checkout@v6,
+  setup-node@v6, configure-pages@v5, upload-pages-artifact@v4, deploy-pages@v4 (looked up 2026-10-05).
+  Not run yet: nothing has been pushed.
+- Vite `base: "./"` so the site works under /<repo>/; verified by serving the production build locally (WASM
+  loads through the relative hashed asset path).
+- File picker is now a real <button> forwarding to the hidden input (keyboard-accessible; M5 gap closed).
+  Bundle size left as a documented limitation.

@@ -4,6 +4,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "core/mesh.h"
 
@@ -28,5 +29,11 @@ LoadResult parse_obj(std::string_view text);
 // Output is an unwelded triangle soup: triangle i uses vertices 3i, 3i+1, 3i+2.
 // Stored facet normals are ignored; orientation comes from vertex order (D19).
 LoadResult parse_stl(std::span<const std::uint8_t> bytes);
+
+// Serializers (benchmark inputs, export). OBJ: `v` lines with 17 significant digits (round-trips
+// doubles exactly) and 1-based `f` lines. Binary STL: zero normals, little-endian float32, so
+// coordinates are rounded to float32 and each triangle stores its own 3 corners (a soup).
+std::string write_obj(const TriMesh& mesh);
+std::vector<std::uint8_t> write_stl_binary(const TriMesh& mesh);
 
 }  // namespace dmw

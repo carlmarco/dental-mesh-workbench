@@ -18,6 +18,8 @@ target_link_libraries(dmw PRIVATE dmw_core embind)
 #                     into WASM memory and pass C++ an offset (D41).
 #  --emit-tsd         generate TypeScript declarations from the embind registry,
 #                     replacing the hand-written .d.ts (D8 revisited, D42).
+#  (Optimization: CMake links through em++ and passes CMAKE_CXX_FLAGS_RELEASE = -O3 on the link
+#   line too, so Emscripten's link-time optimizer already runs; verified in link.txt, D58.)
 target_link_options(dmw PRIVATE
     -sMODULARIZE=1
     -sEXPORT_ES6=1

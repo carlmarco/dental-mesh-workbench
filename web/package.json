@@ -7,7 +7,9 @@
     "typecheck": "tsc --noEmit",
     "smoke": "node src/smoke.ts",
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "bench": "node src/bench.ts",
+    "preview": "vite preview"
   },
   "devDependencies": {
     "@types/node": "26.6.4",

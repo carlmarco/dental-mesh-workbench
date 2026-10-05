@@ -26,4 +26,5 @@ else()
 
     enable_testing()  # must be in the top-level file for `ctest` to find tests
     add_subdirectory(tests)
+    add_subdirectory(tools)
 endif()
