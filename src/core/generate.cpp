@@ -1,6 +1,7 @@
 #include "core/generate.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 #include <set>
@@ -44,6 +45,49 @@ TriMesh make_grid_with_holes(std::uint32_t nx, std::uint32_t ny,
             const std::uint32_t a = j * row + i, b = a + 1, c = a + row + 1, d = a + row;
             m.triangles.push_back({a, b, c});
             m.triangles.push_back({a, c, d});
+        }
+    }
+    return m;
+}
+
+TriMesh make_plate_with_handle(std::uint32_t n, std::uint32_t tube_segments, double arch_height) {
+    if (n < 8 || tube_segments < 2) return {};
+    const std::uint32_t j = n / 2, ia = n / 4, ib = 3 * n / 4 - 1;
+    TriMesh m = make_grid_with_holes(n, n, {{ia, j}, {ib, j}});
+    const std::uint32_t row = n + 1;
+    auto corner = [row, j](std::uint32_t i, int dx, int dy) {
+        return (j + static_cast<std::uint32_t>(dy)) * row + i + static_cast<std::uint32_t>(dx);
+    };
+    // Hole corners counter-clockwise seen from +z: (-,-), (+,-), (+,+), (-,+).
+    const std::array<std::uint32_t, 4> a{corner(ia, 0, 0), corner(ia, 1, 0), corner(ia, 1, 1), corner(ia, 0, 1)};
+    const std::array<std::uint32_t, 4> b{corner(ib, 0, 0), corner(ib, 1, 0), corner(ib, 1, 1), corner(ib, 0, 1)};
+
+    // The plate traverses each hole rim clockwise (seen from +z), so the tube must traverse
+    // both rims counter-clockwise. Ring t sits on an arch from hole A's center to hole B's;
+    // its corner offsets rotate by pi * t about the y axis, so at hole B the ring arrives
+    // upside down: corner k of A lands on B's corner order [b1, b0, b3, b2]. That mirrored
+    // order is exactly what keeps the winding consistent (checked by the topology tests).
+    const double h = 1.0 / n;  // cell size
+    const double cax = (ia + 0.5) * h, cbx = (ib + 0.5) * h, cy = (j + 0.5) * h;
+    const double ox[4] = {-h / 2, h / 2, h / 2, -h / 2}, oy[4] = {-h / 2, -h / 2, h / 2, h / 2};
+    std::vector<std::array<std::uint32_t, 4>> rings{a};
+    for (std::uint32_t t = 1; t < tube_segments; ++t) {
+        const double s = static_cast<double>(t) / tube_segments, phi = std::numbers::pi * s;
+        const double cx = cax + (cbx - cax) * (1 - std::cos(phi)) / 2, cz = arch_height * std::sin(phi);
+        std::array<std::uint32_t, 4> ring{};
+        for (std::size_t k = 0; k < 4; ++k) {
+            ring[k] = static_cast<std::uint32_t>(m.positions.size());
+            m.positions.push_back({cx + ox[k] * std::cos(phi), cy + oy[k], cz - ox[k] * std::sin(phi)});
+        }
+        rings.push_back(ring);
+    }
+    rings.push_back({b[1], b[0], b[3], b[2]});
+    for (std::size_t t = 0; t + 1 < rings.size(); ++t) {
+        for (std::size_t k = 0; k < 4; ++k) {
+            const std::uint32_t p0 = rings[t][k], p1 = rings[t][(k + 1) % 4];
+            const std::uint32_t q0 = rings[t + 1][k], q1 = rings[t + 1][(k + 1) % 4];
+            m.triangles.push_back({p0, p1, q1});  // contains p0 -> p1: counter-clockwise on rim A
+            m.triangles.push_back({p0, q1, q0});
         }
     }
     return m;
@@ -160,6 +204,25 @@ TriMesh make_mobius(std::uint32_t segments, double radius, double half_width) {
         m.triangles.push_back({t, b, bn});
         m.triangles.push_back({t, bn, tn});
     }
+    return m;
+}
+
+TriMesh make_defect_showcase() {
+    TriMesh m = make_grid(4, 4);                  // vertices 0..24, faces 0..31
+    m.triangles[2 * (2 * 4 + 2)] = {12, 18, 13};  // cell (2,2), first triangle, flipped
+    const auto apex = static_cast<std::uint32_t>(m.positions.size());
+    m.positions.push_back({0.375, 0.25, 0.3});
+    m.triangles.push_back({6, 7, apex});  // fin: edge 6-7 now has 3 faces
+    const auto p = static_cast<std::uint32_t>(m.positions.size());
+    m.positions.push_back({1.25, 1.0, 0.0});
+    m.positions.push_back({1.25, 1.25, 0.0});
+    m.triangles.push_back({24, p, p + 1});         // touches the grid only at vertex 24
+    m.triangles.push_back({16, 21, 15});           // same vertex set as face 24 (15, 16, 21)
+    m.triangles.push_back({0, 0, 1});              // repeated index
+    m.positions.push_back({-0.5, -0.5, 0.0});      // referenced by nothing
+    TriMesh strip = make_mobius(12, 0.35, 0.12);
+    for (auto& q : strip.positions) q.x += 2.0, q.y += 0.5;
+    append(m, strip);
     return m;
 }
 

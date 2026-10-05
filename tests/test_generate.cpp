@@ -73,6 +73,16 @@ TEST_CASE("generate: grid with holes removes 2 faces and 1 edge per hole", "[gen
     CHECK(count_edges(m) == (6 * 7 + 6 * 7 + 36) - 2);  // only the two diagonals vanish
 }
 
+TEST_CASE("generate: plate with handle counts", "[generate]") {
+    const std::uint32_t n = 12, segs = 16;
+    const auto m = make_plate_with_handle(n, segs);
+    REQUIRE(indices_in_range(m));
+    CHECK(m.positions.size() == (n + 1) * (n + 1) + 4 * (segs - 1));
+    CHECK(m.triangles.size() == 2 * n * n - 4 + 8 * segs);
+    // Grid with 2 holes, plus the tube: rings 4(segs-1), longitudinal 4 segs, diagonals 4 segs.
+    CHECK(count_edges(m) == (2 * n * (n + 1) + n * n - 2) + 4 * (segs - 1) + 8 * segs);
+}
+
 TEST_CASE("generate: torus counts, outward winding, volume", "[generate]") {
     const auto m = make_torus(16, 8, 1.0, 0.3);
     REQUIRE(indices_in_range(m));
@@ -141,5 +151,6 @@ TEST_CASE("generate: invalid parameters give an empty mesh", "[generate]") {
     CHECK(make_icosphere(11).triangles.empty());
     CHECK(make_mobius(2).triangles.empty());
     CHECK(make_cylinder(2, 3).triangles.empty());
+    CHECK(make_plate_with_handle(7).triangles.empty());
     CHECK(make_grid_with_holes(3, 3, {{3, 0}}).triangles.empty());  // cell out of range
 }

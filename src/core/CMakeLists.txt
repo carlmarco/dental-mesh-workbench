@@ -1,6 +1,6 @@
-add_library(dmw_core STATIC arith.cpp io_obj.cpp io_stl.cpp weld.cpp halfedge.cpp generate.cpp topology.cpp curvature.cpp)
+add_library(dmw_core STATIC io_obj.cpp io_stl.cpp weld.cpp halfedge.cpp generate.cpp topology.cpp curvature.cpp)
 
-# PUBLIC include dir: anything linking dmw_core can #include "core/arith.h".
+# PUBLIC include dir: anything linking dmw_core can #include "core/<header>.h".
 # The header lives under include/core/ so includes are namespaced by path.
 target_include_directories(dmw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 

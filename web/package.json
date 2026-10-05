@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:wasm": "bash ../scripts/build-wasm.sh && mkdir -p src/wasm && cp ../build-wasm/dist/dmw.mjs ../build-wasm/dist/dmw.wasm src/wasm/",
+    "build:wasm": "bash ../scripts/build-wasm.sh && mkdir -p src/wasm && cp ../build-wasm/dist/dmw.mjs ../build-wasm/dist/dmw.wasm src/wasm/ && cp ../build-wasm/dist/dmw.d.ts src/wasm/dmw.d.mts",
     "typecheck": "tsc --noEmit",
     "smoke": "node src/smoke.ts",
     "dev": "vite",
@@ -11,7 +11,11 @@
   },
   "devDependencies": {
     "@types/node": "26.6.4",
+    "@types/three": "0.186.0",
     "typescript": "7.0.2",
     "vite": "8.3.2"
+  },
+  "dependencies": {
+    "three": "0.186.1"
   }
 }

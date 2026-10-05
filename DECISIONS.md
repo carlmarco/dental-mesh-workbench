@@ -241,3 +241,39 @@ Each entry: the choice, the alternatives considered, and the reason.
 - **Limitation:** icosphere with vertices jittered by ~0.25h along the sphere: max H error ~0.28 and mean ~9e-3 at
   s = 4, 5, 6, i.e. no convergence. With 0.1h jitter the mean converges but the max stalls near 1e-2. Pinned by a
   characterization test as the baseline for M6b.
+
+## D40. Viewer generators: plate with a handle, defect showcase
+- `make_plate_with_handle`: two holes joined by an arched square tube (chi = -1, b = 1, genus 1). The tube's last
+  ring is attached in mirrored corner order; the natural order was verified to produce misoriented edges.
+- `make_defect_showcase`: one mesh with every defect class at known indices, tested, used as the viewer demo.
+- The M1 placeholder `add()` and its test were removed.
+
+## D41. JS <-> WASM data transfer
+- **Input:** JS `_malloc`s inside WASM, copies bytes with `HEAPU8.set`, passes the integer offset; C++ reads via
+  `std::span` in place; JS frees. One bulk copy. HEAPU8 is read after malloc because malloc may grow memory and
+  detach older views.
+- **Output:** C++ returns `typed_memory_view`s (zero-copy JS views into WASM memory); JS copies each with
+  `.slice()` immediately, since the views die on the next call that grows memory.
+- **Alternatives:** embind `std::vector` / `val` conversions (per-element), returning JSON for bulk data.
+- Stats (small) are returned as hand-built JSON.
+
+## D42. Generated TypeScript declarations (D8 revisited)
+- `emcc --emit-tsd` generates `dmw.d.ts` from the embind registry; copied as `dmw.d.mts` next to `dmw.mjs`. Removes
+  the hand-synced declaration file. Typed-array accessors come out as `any` and are typed in `dmw.ts`.
+
+## D43. Three.js 0.186.1 viewer choices
+- Per-vertex fields on indexed geometry; per-face colors (components) on non-indexed geometry, since an indexed
+  vertex is shared by faces of different colors.
+- Fat lines (`LineSegments2`) because WebGL ignores line widths > 1; polygon offset on faces to avoid z-fighting;
+  non-manifold and misoriented edges and non-manifold vertices drawn without depth test so they are never hidden.
+- Diverging cool-warm color map, symmetric range at the 98th percentile of |value| (curvature is heavy-tailed);
+  NaN (boundary) drawn gray.
+- GPU geometries and materials are disposed explicitly on every rebuild.
+- **Known gaps (for M7):** 617 kB bundle (mostly Three.js); the file picker is a hidden input inside a label and is
+  not keyboard-accessible.
+
+## D44. Cross-target smoke test
+- `npm run smoke` runs the WASM build under Node and checks genus, Gauss-Bonnet totals, defect detection, and the
+  STL/OBJ byte paths against the values the native tests establish.
+- **Verified in the browser (2026-10-05):** plate with handle (chi -1, b 1, g 1, only the outer rim highlighted),
+  defect showcase overlays, torus Gaussian curvature sign pattern; no console errors.

@@ -96,6 +96,20 @@ TEST_CASE("topology: grid with 2 holes has 3 boundary loops, b1 = 2", "[topology
     check_euler_poincare(r);
 }
 
+TEST_CASE("topology: plate with a handle - same chi as two holes, but genus 1", "[topology]") {
+    // chi = -1 like the two-hole grid; b = 1 instead of 3, so g = (2 + 1 - 1) / 2 = 1.
+    const auto r = analyze_topology(make_plate_with_handle());
+    REQUIRE(r.components.size() == 1);
+    const auto& c = r.components[0];
+    CHECK(c.euler_characteristic == -1);
+    CHECK(c.boundary_loops == 1);
+    CHECK(c.manifold);
+    CHECK(c.consistently_oriented);  // the mirrored ring order at hole B is right
+    CHECK(c.genus == std::optional<std::uint32_t>{1});
+    CHECK(c.betti == std::optional<Betti>{{1, 2, 0}});
+    check_euler_poincare(r);
+}
+
 TEST_CASE("topology: disjoint union reports each component separately", "[topology]") {
     auto m = tetra();  // vertices 0-3
     append(m, make_torus(8, 5));
@@ -176,6 +190,30 @@ TEST_CASE("topology: invalid, duplicate and isolated elements are reported and e
     REQUIRE(r.components.size() == 1);
     CHECK(r.components[0].euler_characteristic == 2);  // still the clean tetrahedron
     CHECK(r.count(EdgeKind::Manifold) == 6);
+}
+
+TEST_CASE("topology: defect showcase - every defect detected and located", "[topology]") {
+    const auto m = make_defect_showcase();
+    const auto r = analyze_topology(m);
+    const std::uint32_t apex = 25, isolated = 28, first_strip_vertex = 29;
+    CHECK(r.invalid_faces == Ids{35});
+    CHECK(r.duplicate_faces == Ids{34});
+    CHECK(r.isolated_vertices == Ids{isolated});
+    CHECK(r.nonmanifold_vertices == Ids{24});
+    CHECK(r.count(EdgeKind::NonManifold) == 1);
+    for (std::size_t e = 0; e < r.edges.size(); ++e) {
+        if (r.edge_kind[e] == EdgeKind::NonManifold) {
+            CHECK(r.edges[e].v0 == 6);
+            CHECK(r.edges[e].v1 == 7);
+        }
+    }
+    REQUIRE(r.components.size() == 2);
+    CHECK(r.vertex_component[apex] == 0);
+    CHECK_FALSE(r.components[0].manifold);
+    CHECK_FALSE(r.components[0].consistently_oriented);
+    CHECK(r.vertex_component[first_strip_vertex] == 1);
+    CHECK(r.components[1].manifold);
+    CHECK_FALSE(r.components[1].orientable);
 }
 
 TEST_CASE("topology: empty mesh has no components", "[topology]") {

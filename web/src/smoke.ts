@@ -1,10 +1,48 @@
-// Headless check that TS -> WASM -> C++ works. Run: npm run smoke
-// Mirrors tests/test_smoke.cpp so native and WASM agree.
+// Cross-target check: the WASM build must give the same answers as the native tests.
+// Run: npm run smoke
 import assert from "node:assert/strict";
-import { loadDmw } from "./dmw.ts";
+import { Dmw } from "./dmw.ts";
 
-const dmw = await loadDmw();
-assert.equal(dmw.add(2, 3), 5);
-assert.equal(dmw.add(-4, 4), 0);
-assert.equal(dmw.add(0, 0), 0);
-console.log("smoke ok: add() callable from TypeScript via WASM");
+const dmw = await Dmw.create();
+const close = (a: number, b: number, tol = 1e-9) => assert.ok(Math.abs(a - b) < tol, `${a} != ${b}`);
+
+// Topology and Gauss-Bonnet through the generators.
+const torus = dmw.generate("torus").stats;
+assert.equal(torus.components[0].genus, 1);
+close(torus.curvature!.totalAngleDefect, 0);
+
+const sphere = dmw.generate("icosphere").stats;
+assert.equal(sphere.components[0].genus, 0);
+close(sphere.curvature!.totalAngleDefect, 4 * Math.PI);
+
+const handle = dmw.generate("plate_handle").stats;
+assert.deepEqual([handle.components[0].chi, handle.components[0].b, handle.components[0].genus], [-1, 1, 1]);
+
+const defects = dmw.generate("defects");
+assert.equal(defects.stats.edgeKinds.nonmanifold, 1);
+assert.deepEqual(Array.from(defects.nonmanifoldVertices), [24]);
+assert.equal(defects.stats.halfedge.ok, false); // non-manifold: no curvature (D10)
+assert.equal(defects.stats.curvature, null);
+
+// The shared-memory input path: a binary STL tetrahedron built byte by byte.
+const tris = [
+  [0, 0, 0, 0, 1, 0, 1, 0, 0],
+  [0, 0, 0, 1, 0, 0, 0, 0, 1],
+  [0, 0, 0, 0, 0, 1, 0, 1, 0],
+  [1, 0, 0, 0, 1, 0, 0, 0, 1],
+];
+const stl = new DataView(new ArrayBuffer(84 + 50 * tris.length));
+stl.setUint32(80, tris.length, true); // little-endian
+tris.forEach((t, i) => t.forEach((c, k) => stl.setFloat32(84 + 50 * i + 12 + 4 * k, c, true)));
+const tet = dmw.loadFile(new Uint8Array(stl.buffer), "stl");
+assert.equal(tet.stats.vertices, 4); // 12 soup corners welded to 4
+assert.equal(tet.stats.components[0].genus, 0);
+close(tet.stats.curvature!.totalAngleDefect, 4 * Math.PI);
+
+// OBJ text path, and a loader error surfacing as an exception.
+const obj = dmw.loadFile(new TextEncoder().encode("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"), "obj");
+assert.equal(obj.stats.components[0].b, 1);
+assert.throws(() => dmw.loadFile(new TextEncoder().encode("f 1 2 3\n"), "obj"), /line 1/);
+
+dmw.dispose();
+console.log("smoke ok: WASM topology, curvature and STL/OBJ input match the native results");
