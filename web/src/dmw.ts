@@ -25,6 +25,8 @@ export interface Stats {
   isolatedVertices: number;
   nonmanifoldVertices: number;
   components: ComponentStats[];
+  intrinsicDelaunay: boolean;
+  flips: number; // intrinsic edge flips (when intrinsicDelaunay)
   halfedge: { ok: boolean; error: string };
   curvature: null | {
     totalAngleDefect: number;
@@ -53,6 +55,7 @@ export const PRESETS = [
   "plate_handle",
   "grid_holes",
   "defects",
+  "brick",
   "icosphere",
   "torus",
   "cylinder",
@@ -90,6 +93,11 @@ export class Dmw {
         this.module._free(ptr);
       }
     });
+  }
+
+  // Switch curvature and geodesics to the intrinsic Delaunay Laplacian (M6b) or back.
+  setIntrinsicDelaunay(on: boolean): MeshData {
+    return this.run(() => (this.session.setIntrinsicDelaunay(on), ""));
   }
 
   // Heat-method distance from one vertex. The first call on a mesh also builds and factors

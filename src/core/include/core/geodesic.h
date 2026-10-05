@@ -8,6 +8,7 @@
 #include "core/cholesky.h"
 #include "core/dec.h"
 #include "core/halfedge.h"
+#include "core/intrinsic.h"
 
 namespace dmw {
 
@@ -28,17 +29,22 @@ struct GeodesicResult {
 // constructor (envelope LDL^T, D49); each query is then two pairs of triangular solves.
 // Iterative CG is NOT used for step I: it cannot resolve the exponentially small heat values
 // far from the source (measured, D47).
+//
+// With intrinsic_delaunay = true the operators come from the intrinsic Delaunay triangulation
+// of the mesh (Bobenko & Springborn 2007; flips per Fisher et al. 2007): same vertices and
+// surface, all cotan weights >= 0 (M6b). Distances are still per original vertex.
 class HeatGeodesics {
 public:
-    explicit HeatGeodesics(const HalfEdgeMesh& mesh, double time_factor = 1.0);
+    explicit HeatGeodesics(const HalfEdgeMesh& mesh, double time_factor = 1.0, bool intrinsic_delaunay = false);
     bool ok() const { return error_.empty(); }
     const std::string& error() const { return error_; }
     GeodesicResult distance(std::span<const std::uint32_t> sources) const;
     const DecOperators& operators() const { return ops_; }
+    const IntrinsicTriangulation& triangulation() const { return tri_; }
     std::size_t factor_entries() const { return heat_.stored_entries() + poisson_.stored_entries(); }
 
 private:
-    const HalfEdgeMesh* mesh_;
+    IntrinsicTriangulation tri_;  // owned: no pointer back to the caller's mesh
     DecOperators ops_;
     double time_step_;
     EnvelopeLdlt heat_;                  // *0 - t L, SPD

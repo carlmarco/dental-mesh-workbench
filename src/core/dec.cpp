@@ -1,4 +1,5 @@
 #include "core/dec.h"
+#include "core/intrinsic.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -21,57 +22,9 @@ double cot_at(const Vec3& p, const Vec3& q, const Vec3& r) {
 
 }  // namespace
 
-DecOperators build_dec(const HalfEdgeMesh& m) {
-    const auto nv = static_cast<std::uint32_t>(m.positions.size());
-    const auto nh = static_cast<std::uint32_t>(m.origin.size());
-    const std::uint32_t nf = nh / 3;
-    DecOperators ops;
-
-    // Edges from half-edges: one per twin pair (taken at the smaller id) or per boundary
-    // half-edge. Each edge is oriented low -> high vertex index.
-    std::vector<std::uint32_t> edge_of(nh, kInvalid);
-    double total_length = 0.0;
-    for (std::uint32_t h = 0; h < nh; ++h) {
-        if (edge_of[h] != kInvalid) continue;
-        const std::uint32_t a = m.origin[h], b = dest(m, h);
-        const auto e = static_cast<std::uint32_t>(ops.edges.size());
-        ops.edges.push_back({std::min(a, b), std::max(a, b)});
-        edge_of[h] = e;
-        if (m.twin[h] != kInvalid) edge_of[m.twin[h]] = e;
-        total_length += norm(m.positions[a] - m.positions[b]);
-    }
-    const auto ne = static_cast<std::uint32_t>(ops.edges.size());
-    ops.mean_edge_length = ne > 0 ? total_length / ne : 0.0;
-
-    std::vector<Triplet> d0, d1;
-    for (std::uint32_t e = 0; e < ne; ++e) {
-        d0.push_back({e, ops.edges[e].v0, -1.0});
-        d0.push_back({e, ops.edges[e].v1, +1.0});
-    }
-    ops.star0.assign(nv, 0.0);
-    ops.star1.assign(ne, 0.0);
-    for (std::uint32_t f = 0; f < nf; ++f) {
-        const Vec3 p[3] = {m.positions[m.origin[3 * f]], m.positions[m.origin[3 * f + 1]],
-                           m.positions[m.origin[3 * f + 2]]};
-        const double area = 0.5 * norm(cross(p[1] - p[0], p[2] - p[0]));
-        for (std::uint32_t k = 0; k < 3; ++k) {
-            const std::uint32_t h = 3 * f + k, e = edge_of[h];
-            // Half-edge h runs corner k -> k+1, agreeing with edge e iff it starts at e.v0.
-            d1.push_back({f, e, m.origin[h] == ops.edges[e].v0 ? 1.0 : -1.0});
-            // The angle opposite h is at corner k+2.
-            ops.star1[e] += 0.5 * cot_at(p[(k + 2) % 3], p[k], p[(k + 1) % 3]);
-            ops.star0[m.origin[h]] += area / 3.0;
-        }
-    }
-    ops.d0 = SparseMatrix::from_triplets(ne, nv, std::move(d0));
-    ops.d1 = SparseMatrix::from_triplets(nf, ne, std::move(d1));
-
-    // L = -d0^T *1 d0. Expanding one edge (i, j) with weight w: L_ii -= w, L_jj -= w,
-    // L_ij += w, L_ji += w. Hence rows sum to zero (constants are in the kernel).
-    ops.laplacian = weighted_gram(ops.d0, ops.star1);
-    for (double& v : ops.laplacian.value) v = -v;
-    return ops;
-}
+// The cotan Laplacian is intrinsic: build everything from the mesh's Euclidean edge lengths,
+// with the one implementation in intrinsic.cpp (D52).
+DecOperators build_dec(const HalfEdgeMesh& m) { return build_dec(intrinsic_from_mesh(m)); }
 
 std::vector<Vec3> face_gradient(const HalfEdgeMesh& m, std::span<const double> u) {
     const std::size_t nf = m.origin.size() / 3;

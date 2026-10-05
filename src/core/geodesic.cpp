@@ -94,19 +94,19 @@ SparseMatrix pinned_poisson(const DecOperators& ops, std::span<const std::uint32
 
 }  // namespace
 
-HeatGeodesics::HeatGeodesics(const HalfEdgeMesh& mesh, double time_factor)
-    : mesh_(&mesh),
-      ops_(build_dec(mesh)),
+HeatGeodesics::HeatGeodesics(const HalfEdgeMesh& mesh, double time_factor, bool intrinsic_delaunay)
+    : tri_(intrinsic_delaunay ? dmw::intrinsic_delaunay(mesh) : intrinsic_from_mesh(mesh)),
+      ops_(build_dec(tri_)),
       time_step_(time_step_for(ops_, time_factor)),
       heat_(heat_matrix(ops_, time_step_)),
-      pinned_(one_vertex_per_component(mesh)),
+      pinned_(one_vertex_per_component(tri_.connectivity)),
       poisson_(pinned_poisson(ops_, pinned_)) {
     if (!heat_.ok()) error_ = "heat matrix: " + heat_.error();
     else if (!poisson_.ok()) error_ = "Poisson matrix: " + poisson_.error();
 }
 
 GeodesicResult HeatGeodesics::distance(std::span<const std::uint32_t> sources) const {
-    const HalfEdgeMesh& m = *mesh_;
+    const HalfEdgeMesh& m = tri_.connectivity;
     GeodesicResult res;
     res.time_step = time_step_;
     res.error = validate(m, sources);
@@ -125,15 +125,17 @@ GeodesicResult HeatGeodesics::distance(std::span<const std::uint32_t> sources) c
 
     // II. Normalized negative gradient. Where heat never arrived (other components), grad u = 0
     // and X stays 0; those vertices are set to NaN below.
-    std::vector<Vec3> x = face_gradient(m, u);
-    for (Vec3& g : x) {
-        const double len = norm(g);
-        g = len > 0.0 ? (-1.0 / len) * g : Vec3{};
+    // Gradients live in each face's own 2D frame (lengths only), so this works for any
+    // intrinsic triangulation, including flipped edges that are not straight in 3D.
+    std::vector<Vec2> x = intrinsic_gradient(tri_, u);
+    for (Vec2& g : x) {
+        const double len = std::hypot(g[0], g[1]);
+        g = len > 0.0 ? Vec2{-g[0] / len, -g[1] / len} : Vec2{0.0, 0.0};
     }
 
     // III. Poisson: L phi = div X  <=>  (-L) phi = -div X. Consistent because the discrete
     // divergence sums to zero on each component. Pinned vertices get rhs 0 (phi = 0 there).
-    std::vector<double> rhs = vertex_divergence(m, x);
+    std::vector<double> rhs = intrinsic_divergence(tri_, x);
     for (double& v : rhs) v = -v;
     for (std::uint32_t p : pinned_) rhs[p] = 0.0;
     const std::vector<double> phi = poisson_.solve(rhs);

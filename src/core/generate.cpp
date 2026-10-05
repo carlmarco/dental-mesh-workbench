@@ -207,6 +207,15 @@ TriMesh make_mobius(std::uint32_t segments, double radius, double half_width) {
     return m;
 }
 
+TriMesh make_brick_grid(std::uint32_t n, double shift) {
+    TriMesh m = make_grid(n, n);
+    for (auto& p : m.positions) {
+        const long j = std::lround(p.y * n);
+        if (p.x > 0 && p.x < 1) p.x += (j % 2 != 0 ? 1.0 : -1.0) * shift / n;
+    }
+    return m;
+}
+
 TriMesh make_defect_showcase() {
     TriMesh m = make_grid(4, 4);                  // vertices 0..24, faces 0..31
     m.triangles[2 * (2 * 4 + 2)] = {12, 18, 13};  // cell (2,2), first triangle, flipped

@@ -32,6 +32,18 @@ close(geo.distance[0], 0, 1e-12);
 close(geo.distance[3], Math.PI, 5e-2);
 assert.throws(() => (dmw.generate("defects"), dmw.geodesic(0)), /manifold/);
 
+// Intrinsic Delaunay (M6b) through WASM: the brick grid has obtuse triangles, needs flips, and
+// geodesics stay accurate; Gauss-Bonnet is untouched (angle defects are intrinsic).
+const brickCot = dmw.generate("brick");
+const brickIdt = dmw.setIntrinsicDelaunay(true);
+assert.ok(brickIdt.stats.flips > 0);
+close(brickIdt.stats.curvature!.totalAngleDefect, brickCot.stats.curvature!.totalAngleDefect, 1e-9);
+const center = 15 * 31 + 15, corner = 0; // 30x30 grid: center vertex and corner (0, 0)
+const dBrick = dmw.geodesic(center).distance;
+const p = brickIdt.positions;
+close(dBrick[corner], Math.hypot(p[3 * corner] - p[3 * center], p[3 * corner + 1] - p[3 * center + 1]), 3e-2);
+dmw.setIntrinsicDelaunay(false);
+
 // The shared-memory input path: a binary STL tetrahedron built byte by byte.
 const tris = [
   [0, 0, 0, 0, 1, 0, 1, 0, 0],
@@ -53,4 +65,4 @@ assert.equal(obj.stats.components[0].b, 1);
 assert.throws(() => dmw.loadFile(new TextEncoder().encode("f 1 2 3\n"), "obj"), /line 1/);
 
 dmw.dispose();
-console.log("smoke ok: WASM topology, curvature and STL/OBJ input match the native results; geodesics OK");
+console.log("smoke ok: WASM topology, curvature and STL/OBJ input match the native results; geodesics and intrinsic Delaunay OK");

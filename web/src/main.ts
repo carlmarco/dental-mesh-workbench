@@ -8,6 +8,7 @@ const LABELS: Record<Preset, string> = {
   plate_handle: "Plate with a handle (genus 1)",
   grid_holes: "Plate with two holes (genus 0)",
   defects: "Defect showcase",
+  brick: "Obtuse \"brick\" grid (cotan fails)",
   icosphere: "Icosphere",
   torus: "Torus",
   cylinder: "Open cylinder",
@@ -21,11 +22,13 @@ const fileInput = byId<HTMLInputElement>("file");
 const weld = byId<HTMLInputElement>("weld");
 const errorBox = byId<HTMLParagraphElement>("error");
 const view = byId<HTMLElement>("view");
+const idt = byId<HTMLInputElement>("idt");
 
 const dmw = await Dmw.create();
 const viewer = new Viewer(view);
 let data: MeshData | null = null;
 let geodesicInfo = ""; // legend text for the current distance field
+let geodesicSource = 0;
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
 const rgb = ([r, g, b]: number[]) => `rgb(${r * 255}, ${g * 255}, ${b * 255})`;
@@ -50,6 +53,7 @@ function computeGeodesic(source: number): boolean {
   try {
     const first = geodesicInfo === "";
     const g = dmw.geodesic(source);
+    geodesicSource = source;
     viewer.setGeodesic(g.distance, source);
     geodesicInfo = `Source: vertex ${source}. ${first ? "Factor + solve" : "Solve (reusing factorization)"}: ${g.millis.toFixed(1)} ms.`;
     return true;
@@ -123,6 +127,7 @@ function renderStats(s: Stats, millis: number): void {
         <dt>H range</dt><dd>${s.curvature.meanRange ? s.curvature.meanRange.map(fmt).join(" … ") : "–"}</dd>
         <dt>K range</dt><dd>${s.curvature.gaussianRange ? s.curvature.gaussianRange.map(fmt).join(" … ") : "–"}</dd>
         <dt>Zero-area faces</dt><dd>${s.curvature.degenerateFaces}</dd>
+        <dt>Laplacian</dt><dd>${s.intrinsicDelaunay ? `intrinsic Delaunay (${s.flips} flips)` : "cotan"}</dd>
       </dl>`
     : `<p class="flag">Not computed: the half-edge build rejected this mesh (${esc(s.halfedge.error)}).
         The curvature code needs a manifold with consistent orientation. Gray in the curvature views means
@@ -148,6 +153,7 @@ function renderStats(s: Stats, millis: number): void {
 }
 
 async function openFile(file: File): Promise<void> {
+  idt.checked = false;
   const ext = file.name.toLowerCase().split(".").pop();
   if (ext !== "stl" && ext !== "obj") {
     errorBox.textContent = "Only .stl and .obj files are supported.";
@@ -157,7 +163,24 @@ async function openFile(file: File): Promise<void> {
   run(() => dmw.loadFile(bytes, ext, Math.max(0, Number(weld.value) || 0)));
 }
 
-preset.addEventListener("change", () => run(() => dmw.generate(preset.value as Preset)));
+preset.addEventListener("change", () => {
+  idt.checked = false; // each new mesh starts with the plain cotan Laplacian
+  run(() => dmw.generate(preset.value as Preset));
+});
+idt.addEventListener("change", () => {
+  if (!data) return;
+  const keepSource = geodesicInfo !== "" ? geodesicSource : null;
+  try {
+    const d = dmw.setIntrinsicDelaunay(idt.checked);
+    viewer.setGeodesic(null, null);
+    geodesicInfo = "";
+    data = d;
+    if (overlay() === "geodesic" && keepSource !== null) computeGeodesic(keepSource);
+    display(d, true);
+  } catch (e) {
+    errorBox.textContent = (e as Error).message;
+  }
+});
 fileInput.addEventListener("change", () => fileInput.files?.[0] && openFile(fileInput.files[0]));
 view.addEventListener("dragover", (e) => e.preventDefault());
 view.addEventListener("drop", (e) => {

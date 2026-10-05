@@ -54,9 +54,11 @@ TEST_CASE("dec: d1 d0 = 0 exactly (curl of a gradient vanishes)", "[dec]") {
         for (double seed : {1.0, 2.0, 3.0}) {
             const auto f = pseudo_random(m.positions.size(), seed * 1000);
             const auto curl_grad = ops.d1.multiply(ops.d0.multiply(f));
-            // Entries are +-1, so each face sums the same three differences with opposite
-            // signs: the cancellation is exact even in floating point.
-            for (double c : curl_grad) CHECK(c == 0.0);
+            // Algebraically exact: each face sums (b - a) + (c - b) + (a - c). In floating
+            // point the three differences are rounded, so the sum is only ~1e-16 * |f|.
+            // (An earlier version asserted == 0.0; it passed for these [-1, 1] inputs but is
+            // false in general: measured nonzero sums up to 2.3e-13 with mixed magnitudes.)
+            for (double c : curl_grad) CHECK_THAT(c, WithinAbs(0.0, 1e-14));
         }
     }
 }

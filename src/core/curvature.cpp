@@ -1,4 +1,5 @@
 #include "core/curvature.h"
+#include "core/intrinsic.h"
 #include "detail/vec.h"
 
 #include <cmath>
@@ -17,7 +18,7 @@ constexpr double kPi = std::numbers::pi;
 
 }  // namespace
 
-CurvatureField compute_curvature(const HalfEdgeMesh& m) {
+CurvatureField compute_curvature(const HalfEdgeMesh& m, bool intrinsic_delaunay) {
     const std::size_t nv = m.positions.size();
     const std::size_t nf = m.origin.size() / 3;
 
@@ -89,6 +90,28 @@ CurvatureField compute_curvature(const HalfEdgeMesh& m) {
         } else {
             // Circumcenter lies outside the triangle, so the Voronoi split would go negative.
             for (int k = 0; k < 3; ++k) c.mixed_area[v[k]] += (k == obtuse) ? area / 2 : area / 4;
+        }
+    }
+
+    if (intrinsic_delaunay) {
+        // Replace the cotan sum and the mixed area by their intrinsic Delaunay counterparts.
+        // (L x)_i = sum_j w_ij (x_j - x_i) = -sum_j w_ij (x_i - x_j), and Meyer's cot_sum is
+        // sum_j (cot a + cot b)(x_i - x_j) = 2 sum_j w_ij (x_i - x_j), so cot_sum = -2 L x.
+        const IntrinsicTriangulation t = dmw::intrinsic_delaunay(m);
+        c.intrinsic_flips = t.flips;
+        const SparseMatrix L = build_dec(t).laplacian;
+        c.mixed_area = mixed_area(t);
+        std::vector<double> coord(nv);
+        for (int axis = 0; axis < 3; ++axis) {
+            for (std::size_t v = 0; v < nv; ++v) {
+                const Vec3& p = m.positions[v];
+                coord[v] = axis == 0 ? p.x : axis == 1 ? p.y : p.z;
+            }
+            const std::vector<double> lx = L.multiply(coord);
+            for (std::size_t v = 0; v < nv; ++v) {
+                double& slot = axis == 0 ? cot_sum[v].x : axis == 1 ? cot_sum[v].y : cot_sum[v].z;
+                slot = -2.0 * lx[v];
+            }
         }
     }
 

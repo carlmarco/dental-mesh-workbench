@@ -71,6 +71,7 @@ public:
         else if (name == "plate_handle") m = make_plate_with_handle(16, 24, 0.35);
         else if (name == "mobius") m = make_mobius(48);
         else if (name == "defects") m = make_defect_showcase();
+        else if (name == "brick") m = make_brick_grid(30, 0.45);
         else return "unknown preset '" + name + "'";
         set_mesh(std::move(m));
         return {};
@@ -86,12 +87,20 @@ public:
     val misorientedEdges() const { return view(misoriented_edges_); }
     val nonmanifoldVertices() const { return view(topo_.nonmanifold_vertices); }
 
+    // Switch curvature and geodesics between the cotan and the intrinsic Delaunay Laplacian.
+    void setIntrinsicDelaunay(bool on) {
+        intrinsic_delaunay_ = on;
+        update_curvature();
+        geodesics_.reset();  // rebuilt with the new operators on the next query
+        distance_.clear();
+    }
+
     // Heat-method distance from one vertex (D51). The solver (and its two factorizations) is
     // built on the first query and reused for every later one on the same mesh.
     std::string geodesic(std::uint32_t source) {
         if (!he_mesh_) return "geodesic distance needs a consistently oriented manifold (" + he_error_ + ")";
         if (!geodesics_) {
-            geodesics_ = std::make_unique<HeatGeodesics>(*he_mesh_);
+            geodesics_ = std::make_unique<HeatGeodesics>(*he_mesh_, 1.0, intrinsic_delaunay_);
             if (!geodesics_->ok()) return geodesics_->error();
         }
         const std::uint32_t src[1] = {source};
@@ -136,7 +145,8 @@ public:
             else o << "null";
             o << '}';
         }
-        o << "],\"halfedge\":{\"ok\":" << (he_error_.empty() ? "true" : "false") << ",\"error\":\""
+        o << "],\"intrinsicDelaunay\":" << (intrinsic_delaunay_ ? "true" : "false")
+          << ",\"flips\":" << curvature_.intrinsic_flips << ",\"halfedge\":{\"ok\":" << (he_error_.empty() ? "true" : "false") << ",\"error\":\""
           << json_escape(he_error_) << "\"},\"curvature\":";
         if (!he_error_.empty()) {
             o << "null";
@@ -159,12 +169,10 @@ private:
         topo_ = analyze_topology(mesh_);
         auto he = build_halfedge(mesh_);  // fails on non-manifold input (D10): no curvature then
         he_error_ = he.error;
-        curvature_ = he.ok() ? compute_curvature(he.mesh) : CurvatureField{};
-        // HeatGeodesics keeps a pointer to the mesh, so the mesh lives on the heap, where it
-        // can't move; the solver is rebuilt lazily for each new mesh.
-        geodesics_.reset();
+        geodesics_.reset();  // rebuilt lazily for each new mesh
         he_mesh_ = he.ok() ? std::make_unique<HalfEdgeMesh>(std::move(he.mesh)) : nullptr;
         distance_.clear();
+        update_curvature();
 
         // GPU-facing buffers: float32 positions (D12: double in the core, float at the GPU).
         positions_.clear();
@@ -174,13 +182,6 @@ private:
         }
         indices_.clear();
         for (const auto& t : mesh_.triangles) indices_.insert(indices_.end(), t.begin(), t.end());
-        auto to_f32 = [](const std::vector<double>& v, std::size_t n) {
-            std::vector<float> out(n, std::numeric_limits<float>::quiet_NaN());
-            for (std::size_t i = 0; i < v.size() && i < n; ++i) out[i] = static_cast<float>(v[i]);
-            return out;
-        };
-        mean_ = to_f32(curvature_.mean, mesh_.positions.size());
-        gaussian_ = to_f32(curvature_.gaussian, mesh_.positions.size());
         face_component_ = topo_.face_component;
         boundary_edges_.clear();
         nonmanifold_edges_.clear();
@@ -197,6 +198,18 @@ private:
         }
     }
 
+    void update_curvature() {
+        curvature_ = he_mesh_ ? compute_curvature(*he_mesh_, intrinsic_delaunay_) : CurvatureField{};
+        auto to_f32 = [](const std::vector<double>& v, std::size_t n) {
+            std::vector<float> out(n, std::numeric_limits<float>::quiet_NaN());
+            for (std::size_t i = 0; i < v.size() && i < n; ++i) out[i] = static_cast<float>(v[i]);
+            return out;
+        };
+        mean_ = to_f32(curvature_.mean, mesh_.positions.size());
+        gaussian_ = to_f32(curvature_.gaussian, mesh_.positions.size());
+    }
+
+    bool intrinsic_delaunay_ = false;
     TriMesh mesh_;
     TopologyReport topo_;
     std::string he_error_;
@@ -225,6 +238,7 @@ EMSCRIPTEN_BINDINGS(dmw) {
         .function("nonmanifoldEdges", &Session::nonmanifoldEdges)
         .function("misorientedEdges", &Session::misorientedEdges)
         .function("nonmanifoldVertices", &Session::nonmanifoldVertices)
+        .function("setIntrinsicDelaunay", &Session::setIntrinsicDelaunay)
         .function("geodesic", &Session::geodesic)
         .function("distance", &Session::distance)
         .function("stats", &Session::stats);

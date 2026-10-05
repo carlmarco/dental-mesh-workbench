@@ -336,3 +336,52 @@ Each entry: the choice, the alternatives considered, and the reason.
   32-bit difference_type).
 - Viewer message for meshes without half-edge structure now says "consistently oriented manifold" and that gray
   means no data (the Moebius strip was being read as "curvature ~ 0").
+
+## D52. Length-only geometry: IntrinsicTriangulation and a single DEC builder
+- Connectivity + one length per half-edge; areas (Kahan's stable Heron), angles and cotangents (law of cosines),
+  gradient and divergence (per-face 2D layout) from lengths only. `build_dec(HalfEdgeMesh)` now delegates to
+  `build_dec(intrinsic_from_mesh(mesh))`: one implementation; all M6 DEC tests pass through it.
+- The heat method now owns an IntrinsicTriangulation (no pointer to the caller's mesh).
+
+## D53. Intrinsic Delaunay by edge flipping (Fisher, Springborn, Bobenko, Schroeder 2007)
+- Flip interior edges with cot a + cot b < -1e-12; new diagonal length by unfolding the two triangles. The operator
+  is the intrinsic Delaunay Laplacian of Bobenko & Springborn (Discrete Comput. Geom. 2007). Sharp & Crane 2020
+  ("A Laplacian for Nonmanifold Triangle Meshes") generalize it to non-manifold input; not implemented.
+- **Limitation:** an intrinsic Delaunay triangulation may need self-loops or multi-edges (Fisher et al. note
+  faces with only two distinct edges). Our vertex-triple connectivity cannot represent them, so such flips are
+  skipped and counted (`skipped`). Measured: 0 skipped on all test meshes except 1 on a 0.45h-jittered s=5
+  icosphere.
+- Tests: flipped connectivity equals a from-scratch half-edge rebuild; total area and every cone angle preserved;
+  edge count preserved; all weights >= 0 when nothing is skipped; regular icosphere needs no flips; linear
+  precision on flat meshes; Euclidean lengths reproduce the extrinsic operators to 1e-12.
+
+## D54. Intrinsic Delaunay option in curvature and heat geodesics
+- `compute_curvature(mesh, true)`: K(x_i) = -(L_idt x)_i / A_i with intrinsic mixed area; angle defects unchanged.
+- `HeatGeodesics(mesh, t, true)`: all operators from the intrinsic Delaunay triangulation.
+
+## D55. Measured effect of intrinsic Delaunay (2026-10-05, native -O2 probes)
+- **Maximum principle (flat "brick" grid, alternate rows shifted 0.45 cell, min cotan weight -0.90):** heat from
+  a point source has 54 (n=20) and 446 (n=40) negative values with cotan, none with intrinsic Delaunay.
+  Heat-geodesic mean error: cotan 4.3e-2 -> 1.07e-1 (gets worse under refinement); intrinsic Delaunay
+  9.9e-3 -> 5.9e-3 (converges). At shift 0.30: no negative heat, but cotan stalls at ~2e-2 while intrinsic
+  Delaunay converges 8.6e-3 -> 4.7e-3.
+- **Jittered icosphere 0.45h (s=3,4,5):** geodesic mean error 4.3e-2/2.2e-2/1.9e-2 -> 2.5e-2/1.8e-2/1.6e-2.
+  Max |H - 1|: 3.0/8.9/16 -> 0.79/1.1/2.2 (about 8x lower, but still growing); mean |H - 1| 2.5-3x lower.
+- **Jittered icosphere 0.25h:** geodesics essentially unchanged (2.9e-2 -> 2.3e-2 at s=3, equal at s=4,5);
+  max |H - 1| about 0.2 either way.
+- **Conclusion:** intrinsic Delaunay fixes negative weights and their consequences (lost maximum principle,
+  non-convergence of heat geodesics, curvature blow-ups). It does not make pointwise mean curvature converge on
+  irregular meshes (the M4 limitation is reduced, not removed).
+
+## D56. Intrinsic Delaunay in the viewer; mutation-harness hardening
+- Session `setIntrinsicDelaunay(bool)` recomputes curvature and resets the geodesic solver; stats report the flip
+  count. New preset `brick` (`make_brick_grid(30, 0.45)`). **Verified in the browser (2026-10-05):** geodesic
+  distance from a corner of the brick grid: cotan gives swirling, broken isolines and max distance 0.505 (true
+  value sqrt(2) = 1.414); intrinsic Delaunay (450 flips) gives concentric quarter-circles and max 1.436.
+- Mutation results for the flip code (D26): unfolding d on c's side -> 6/106 fail; inverted Delaunay test ->
+  infinite flipping, caught by per-test timeouts; vertex remap skipped -> 2/106; twin redirect skipped -> 7/106;
+  duplicate-edge guard removed -> initially SURVIVED (no test exercised it), now 1/106 after adding the
+  flattened-tetrahedron test.
+- Harness lessons: per-test timeouts (mutants can hang); a killed run leaves the mutant on disk (restore from the
+  saved copy); make's 1-second timestamp comparison can leave a stale object, so the harness must verify the
+  mutated file was actually recompiled.

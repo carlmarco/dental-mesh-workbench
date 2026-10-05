@@ -56,6 +56,11 @@ TriMesh make_mobius(std::uint32_t segments, double radius = 1.0, double half_wid
 // plus a Moebius strip (second component, non-orientable) beside it.
 TriMesh make_defect_showcase();
 
+// Flat n x n unit grid with alternate interior rows shifted by +-shift cells: "brick"
+// triangles with obtuse angles. At shift 0.45 the cotan weights go down to -0.9 and heat
+// diffusion breaks the maximum principle; the intrinsic Delaunay Laplacian fixes it (M6b, D55).
+TriMesh make_brick_grid(std::uint32_t n, double shift = 0.45);
+
 // Disjoint union: appends src to dst, offsetting src's indices.
 void append(TriMesh& dst, const TriMesh& src);
 

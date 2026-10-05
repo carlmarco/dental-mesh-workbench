@@ -33,9 +33,16 @@ struct CurvatureField {
     std::vector<double> k1, k2;        // principal: H +- sqrt(max(H^2 - K, 0)), k1 >= k2
 
     std::vector<std::uint32_t> degenerate_faces;  // zero area; excluded from cotan sums (D38)
+    std::uint32_t intrinsic_flips = 0;            // edge flips used (intrinsic_delaunay only)
 };
 
 // Requires a valid half-edge mesh: the operators assume a 2-manifold (with boundary).
-CurvatureField compute_curvature(const HalfEdgeMesh& mesh);
+//
+// intrinsic_delaunay = true (M6b, D54): A_i and K(x_i) come from the intrinsic Delaunay
+// triangulation instead: K(x_i) = -(L_idt x)_i / A_i with A_i its mixed area. Angle defects
+// (hence K_G) are unchanged by intrinsic flips: cone angles are intrinsic. Reduces the
+// blow-ups of cotan mean curvature on obtuse triangles; does not restore pointwise convergence
+// (measured, D55).
+CurvatureField compute_curvature(const HalfEdgeMesh& mesh, bool intrinsic_delaunay = false);
 
 }  // namespace dmw
