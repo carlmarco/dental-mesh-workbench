@@ -6,7 +6,7 @@ One milestone at a time, in order. Each ends with a summary, check questions and
 |---|---|---|---|
 | 1 | Repo and toolchain: native build + tests, Emscripten module callable from TypeScript | | Done |
 | 2 | Mesh I/O (OBJ, STL), vertex welding, half-edge construction | | Done |
-| 3 | Topology diagnostics: boundary / non-manifold edges, components, Euler characteristic, genus and Betti numbers per component (D22) | | |
+| 3 | Topology diagnostics: boundary / non-manifold edges, components, Euler characteristic, genus and Betti numbers per component (D22) | | Done |
 | 4 | Discrete curvature: mixed Voronoi areas, cotan mean-curvature normal, angle-defect Gaussian curvature; Gauss-Bonnet and sphere-convergence tests | Meyer, Desbrun, Schröder, Barr 2003 | |
 | 5 | Viewer: WASM + Three.js, overlays for topology and curvature | | |
 | 6 | Heat-method geodesics, operators written in DEC form (L = d0ᵀ ⋆1 d0); validated vs great-circle distance and Dijkstra | Crane, Weischedel, Wardetzky 2013 | |

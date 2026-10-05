@@ -1,15 +1,12 @@
 #pragma once
 
 #include <cstdint>
-#include <limits>
 #include <string>
 #include <vector>
 
 #include "core/mesh.h"
 
 namespace dmw {
-
-inline constexpr std::uint32_t kInvalid = std::numeric_limits<std::uint32_t>::max();
 
 // Index-based half-edge structure for triangle meshes (D25).
 //

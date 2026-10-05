@@ -1,4 +1,4 @@
-add_library(dmw_core STATIC arith.cpp io_obj.cpp io_stl.cpp weld.cpp halfedge.cpp)
+add_library(dmw_core STATIC arith.cpp io_obj.cpp io_stl.cpp weld.cpp halfedge.cpp generate.cpp topology.cpp)
 
 # PUBLIC include dir: anything linking dmw_core can #include "core/arith.h".
 # The header lives under include/core/ so includes are namespaced by path.

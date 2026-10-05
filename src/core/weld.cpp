@@ -1,4 +1,5 @@
 #include "core/weld.h"
+#include "detail/hash.h"
 
 #include <algorithm>
 #include <array>
@@ -12,22 +13,7 @@
 namespace dmw {
 namespace {
 
-constexpr std::uint32_t kUnassigned = std::numeric_limits<std::uint32_t>::max();
-
-// boost-style hash_combine over three 64-bit words. The result is narrowed to size_t,
-// which is 32 bits on wasm32 and 64 bits natively, hence the explicit cast.
-template <typename Word>
-struct Hash3 {
-    std::size_t operator()(const std::array<Word, 3>& k) const noexcept {
-        std::uint64_t h = 0;
-        for (Word w : k) {
-            std::uint64_t x = 0;
-            std::memcpy(&x, &w, sizeof w);
-            h ^= x + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
-        }
-        return static_cast<std::size_t>(h);
-    }
-};
+constexpr std::uint32_t kUnassigned = kInvalid;
 
 // Exact key: the coordinates' bit patterns, with -0.0 normalized to +0.0 so the two
 // zeros (equal as numbers, different sign bit) hash and compare the same.
@@ -64,8 +50,8 @@ TriMesh weld_vertices(const TriMesh& soup, double epsilon) {
     std::vector<std::uint32_t> remap(soup.positions.size(), kUnassigned);
 
     // Returns the output index for position p, creating a new representative if needed.
-    std::unordered_map<std::array<std::uint64_t, 3>, std::uint32_t, Hash3<std::uint64_t>> exact;
-    std::unordered_map<std::array<std::int64_t, 3>, std::vector<std::uint32_t>, Hash3<std::int64_t>> grid;
+    std::unordered_map<std::array<std::uint64_t, 3>, std::uint32_t, detail::Hash3<std::uint64_t>> exact;
+    std::unordered_map<std::array<std::int64_t, 3>, std::vector<std::uint32_t>, detail::Hash3<std::int64_t>> grid;
     const double eps2 = epsilon * epsilon;
 
     auto find_or_add = [&](const Vec3& p) -> std::uint32_t {

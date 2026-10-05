@@ -72,6 +72,8 @@ Each entry: the choice, the alternatives considered, and the reason.
   method are written by the author.
 - **Amendment (M2):** at the author's explicit request, Claude wrote `halfedge.cpp`, following the formal
   algorithm reviewed beforehand. Tests were verified to catch planted bugs (see D26).
+- **Amendment (M3 onward):** the author chose to have Claude implement all remaining code, including the
+  curvature and heat-method core, with every decision explained and recorded for later review.
 
 ## D12. `double` positions in the core
 - **Alternatives:** `float`.
@@ -166,3 +168,40 @@ Each entry: the choice, the alternatives considered, and the reason.
 - **Practice:** after a routine passes, plant the known classic bugs and confirm the tests fail.
 - **M2 result:** `next(h) = h + 1` -> 6 of 30 tests fail; clockwise rotation in `one_ring` -> 3 of 30 fail.
 - **Reason:** a passing suite only means something if it can fail.
+
+## D27. Synthetic mesh generators live in the core
+- `make_grid`, `make_grid_with_holes`, `make_torus`, `make_icosphere`, `make_mobius`, `append`. Each tested
+  against closed-form V/E/F counts and, for closed meshes, outward winding via positive signed volume.
+- **Reason:** the viewer (M5), curvature convergence tests (M4) and benchmarks (M7) reuse them.
+
+## D28. Components by vertex connectivity
+- **Alternatives:** edge (face-adjacency) connectivity.
+- **Reason:** beta0 counts path components of the space; two triangles meeting at a single vertex are
+  path-connected. Edge connectivity would report a bowtie as two components. Bowties are flagged separately as
+  non-manifold vertices.
+
+## D29. Genus and Betti numbers only for manifold, orientable components
+- g = (2 - chi - b)/2, beta = (1, b > 0 ? 2g + b - 1 : 2g, b == 0 ? 1 : 0). Consistent winding is NOT required:
+  chi and b are combinatorial and unchanged by flipping faces, so a mis-wound but orientable surface gets a genus
+  and a separate "inconsistently oriented" flag.
+- **Reason:** the formula comes from the classification of compact orientable surfaces; outside its hypotheses
+  it produces meaningless numbers.
+
+## D30. Orientability by breadth-first orientation propagation
+- Choose flip[f] in {0,1} per face so every two-face edge becomes consistently wound; a contradiction means
+  non-orientable (e.g. Moebius). O(F).
+- **Reason:** distinguishes fixable winding errors from genuinely non-orientable surfaces, which need different
+  remedies.
+
+## D31. Invalid and duplicate faces are reported and excluded
+- Out-of-range / repeated-index faces and later copies of a face's vertex set are listed, then ignored, so all
+  counts describe the underlying simplicial complex.
+
+## D32. Geometric degeneracy deferred
+- Zero-area and sliver triangles need a tolerance; they are handled where they matter (curvature, M4).
+
+## D33. Shared private helpers
+- `kInvalid` moved to `mesh.h`; `detail/hash.h` (Hash3, pack_pair) and `detail/disjoint_sets.h` (union-find) are
+  shared by welding and topology.
+- **Mutation check (D26) for M3:** orientability ignoring the flip rule -> 1/50 fail (only the Moebius test:
+  thin coverage, noted); counting every boundary vertex as a loop -> 3/50; inverted misorientation test -> 3/50.

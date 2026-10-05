@@ -2,9 +2,13 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace dmw {
+
+// "No such element" for uint32 indices (no twin, isolated vertex, excluded face, ...).
+inline constexpr std::uint32_t kInvalid = std::numeric_limits<std::uint32_t>::max();
 
 // double, not float: see DECISIONS.md D12.
 struct Vec3 {

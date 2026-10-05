@@ -5,9 +5,6 @@
 #include <unordered_map>
 #include <vector>
 
-// Written by Claude at the author's request (DECISIONS.md D11 amendment). Step numbers
-// refer to the algorithm in docs (A7): validate, origins, directed-edge index, twins,
-// vertex half-edges, manifold-vertex check; one_ring is the rho-orbit walk.
 
 namespace dmw {
 
