@@ -73,6 +73,27 @@ TriMesh make_torus(std::uint32_t nu, std::uint32_t nv, double major_radius, doub
     return m;
 }
 
+TriMesh make_cylinder(std::uint32_t nu, std::uint32_t nv, double radius, double height) {
+    if (nu < 3 || nv < 1) return {};
+    TriMesh m;
+    // p(u, z) = (r cos u, r sin u, z); p_u x p_z = (r cos u, r sin u, 0) points outward.
+    for (std::uint32_t j = 0; j <= nv; ++j) {
+        for (std::uint32_t i = 0; i < nu; ++i) {
+            const double u = kTwoPi * i / nu;
+            m.positions.push_back({radius * std::cos(u), radius * std::sin(u), height * j / nv});
+        }
+    }
+    auto idx = [nu](std::uint32_t i, std::uint32_t j) { return j * nu + (i % nu); };
+    for (std::uint32_t j = 0; j < nv; ++j) {
+        for (std::uint32_t i = 0; i < nu; ++i) {
+            const std::uint32_t a = idx(i, j), b = idx(i + 1, j), c = idx(i + 1, j + 1), d = idx(i, j + 1);
+            m.triangles.push_back({a, b, c});
+            m.triangles.push_back({a, c, d});
+        }
+    }
+    return m;
+}
+
 TriMesh make_icosphere(std::uint32_t subdivisions, double radius) {
     if (subdivisions > 10) return {};  // 10 * 4^10 + 2 ~ 10.5M vertices; beyond is a mistake
     // Regular icosahedron: vertices are cyclic permutations of (0, +-1, +-phi).

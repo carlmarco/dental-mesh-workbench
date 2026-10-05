@@ -26,6 +26,11 @@ TriMesh make_grid_with_holes(std::uint32_t nx, std::uint32_t ny,
 TriMesh make_torus(std::uint32_t nu, std::uint32_t nv, double major_radius = 1.0,
                    double minor_radius = 0.3);
 
+// Open cylinder of radius r about the z axis, z in [0, height]: nu segments around, nv rings
+// of cells. chi = 0, two boundary loops. Interior vertices are exactly flat (K = 0) while
+// H -> 1/(2r): the test case that separates mean from Gaussian curvature. nu >= 3, nv >= 1.
+TriMesh make_cylinder(std::uint32_t nu, std::uint32_t nv, double radius = 1.0, double height = 1.0);
+
 // Icosahedron subdivided `subdivisions` times (each triangle -> 4), vertices projected to
 // the sphere. V = 10*4^s + 2, E = 30*4^s, F = 20*4^s. Closed, genus 0. Requires s <= 10.
 TriMesh make_icosphere(std::uint32_t subdivisions, double radius = 1.0);

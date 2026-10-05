@@ -87,6 +87,22 @@ TEST_CASE("generate: torus counts, outward winding, volume", "[generate]") {
     CHECK(vol < 1.15 * smooth);
 }
 
+TEST_CASE("generate: cylinder counts and outward winding", "[generate]") {
+    const auto m = make_cylinder(12, 4, 0.5, 2.0);
+    REQUIRE(indices_in_range(m));
+    CHECK(m.positions.size() == 12 * 5);
+    CHECK(m.triangles.size() == 2 * 12 * 4);
+    // rings nu(nv+1) + verticals nu*nv + diagonals nu*nv = nu(3nv+1); chi = V - E + F = 0.
+    CHECK(count_edges(m) == 12 * (3 * 4 + 1));
+    // Outward: each face normal points away from the z axis.
+    for (const auto& t : m.triangles) {
+        const Vec3 &a = m.positions[t[0]], &b = m.positions[t[1]], &c = m.positions[t[2]];
+        const double nx = (b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y);
+        const double ny = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
+        CHECK(nx * (a.x + b.x + c.x) + ny * (a.y + b.y + c.y) > 0.0);
+    }
+}
+
 TEST_CASE("generate: icosphere counts, on the sphere, outward", "[generate]") {
     for (std::uint32_t s = 0; s <= 3; ++s) {
         const auto m = make_icosphere(s, 2.0);
@@ -124,5 +140,6 @@ TEST_CASE("generate: invalid parameters give an empty mesh", "[generate]") {
     CHECK(make_torus(2, 8).triangles.empty());
     CHECK(make_icosphere(11).triangles.empty());
     CHECK(make_mobius(2).triangles.empty());
+    CHECK(make_cylinder(2, 3).triangles.empty());
     CHECK(make_grid_with_holes(3, 3, {{3, 0}}).triangles.empty());  // cell out of range
 }

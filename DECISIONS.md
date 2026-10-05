@@ -205,3 +205,39 @@ Each entry: the choice, the alternatives considered, and the reason.
   shared by welding and topology.
 - **Mutation check (D26) for M3:** orientability ignoring the flip rule -> 1/50 fail (only the Moebius test:
   thin coverage, noted); counting every boundary vertex as a loop -> 3/50; inverted misorientation test -> 3/50.
+
+## D34. Curvature per Meyer, Desbrun, Schroeder, Barr (2003)
+- Mixed Voronoi area, cotan mean-curvature normal K(x_i) = (1/2A) sum (cot a + cot b)(x_i - x_j) = 2Hn, Gaussian
+  curvature as angle defect / A. (Author order corrected from the original brief: Meyer, Desbrun, Schroeder, Barr.)
+- **Implementation:** per-face scatter instead of per-vertex one-ring gather; each edge's two opposite-angle
+  cotangents arrive from its two faces, so the sums are identical. Angles via atan2(|u x w|, u.w), cotangents as
+  u.w / |u x w|: no acos (ill-conditioned near 0 and pi) and no trig for cot.
+
+## D35. Pointwise curvature = integrated quantity / mixed area
+- Discrete curvature is naturally an integral over a vertex's region; dividing by A_mixed gives a pointwise
+  estimate, as in Meyer et al.
+
+## D36. Boundary vertices: angle defect pi - sum(theta); no pointwise curvature
+- The boundary term makes sum(defects) = 2 pi chi hold with boundary. Mean curvature normal is undefined at the
+  boundary (one-sided ring), so H, K, k1, k2 are NaN there; viewers must treat NaN as "no data".
+
+## D37. Sign of H from area-weighted face normals
+- **Alternatives:** use K(x_i)'s direction (undefined where H = 0); angle-weighted normals.
+- **Reason:** sign needs a normal independent of K(x_i) that follows the winding. Measured consequence: on the
+  icosphere, all H error for s >= 2 comes from this normal deviating from radial (see D39).
+
+## D38. Zero-area faces
+- Listed in `degenerate_faces`; their angles (0, 0, pi) still count toward angle sums so Gauss-Bonnet holds, but
+  their (infinite) cotangents are skipped. Near-degenerate slivers are NOT special-cased; they produce large
+  cotangents, which is the motivation for M6b.
+
+## D39. Measured accuracy (2026-10-05, Apple clang 17, -O2 probe; max error over interior vertices)
+- Icosphere r = 2: H error 2.2e-16 at s=1 (exact by symmetry), then 5.7e-5, 1.4e-5, 3.6e-6, 9.0e-7, 2.3e-7 for
+  s = 2..6 (order 2). K error 2.0e-2, 5.1e-3, 1.4e-3, 3.5e-4, 8.9e-5, 2.2e-5 for s = 1..6 (order 2).
+- Cylinder r = 0.5: H = 1/(2r) and K = 0 to roundoff (1e-16 .. 2e-13) at every resolution: an identity, not
+  convergence.
+- Torus R = 1, r = 0.3, nu = 3 nv: H error 3.6e-2, 9.8e-3, 2.5e-3, 6.3e-4, 1.6e-4 and K error 1.9e-1, 5.0e-2,
+  1.3e-2, 3.2e-3, 8.0e-4 for nv = 8..128 (order 2).
+- **Limitation:** icosphere with vertices jittered by ~0.25h along the sphere: max H error ~0.28 and mean ~9e-3 at
+  s = 4, 5, 6, i.e. no convergence. With 0.1h jitter the mean converges but the max stalls near 1e-2. Pinned by a
+  characterization test as the baseline for M6b.
