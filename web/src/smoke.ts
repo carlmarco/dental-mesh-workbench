@@ -41,6 +41,11 @@ close(geo.distance[3], Math.PI, 5e-2);
 const sph = dmw.generate("icosphere");
 const tips = dmw.detectCusps().vertices;
 assert.ok(tips.every((v) => v < sph.stats.vertices));
+// Margin detection through WASM runs and returns well-formed edges (pairs of in-range vertex ids).
+const plateData = dmw.generate("plate_handle");
+const margin = dmw.detectMargin().edges;
+assert.equal(margin.length % 2, 0);
+assert.ok(margin.every((v) => v < plateData.stats.vertices));
 
 // Intrinsic Delaunay (M6b) through WASM: the brick grid has obtuse triangles, needs flips, and
 // geodesics stay accurate; Gauss-Bonnet is untouched (angle defects are intrinsic).
@@ -75,4 +80,4 @@ assert.equal(obj.stats.components[0].b, 1);
 assert.throws(() => dmw.loadFile(new TextEncoder().encode("f 1 2 3\n"), "obj"), /line 1/);
 
 dmw.dispose();
-console.log("smoke ok: WASM topology, curvature and STL/OBJ input match the native results; geodesics, intrinsic Delaunay, cusp detection OK");
+console.log("smoke ok: WASM topology, curvature and STL/OBJ input match the native results; geodesics, intrinsic Delaunay, cusp and margin detection OK");

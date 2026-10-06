@@ -1,0 +1,80 @@
+#pragma once
+
+#include <cstdint>
+#include <span>
+#include <vector>
+
+#include "core/dec.h"
+#include "core/halfedge.h"
+#include "core/topology.h"
+
+namespace dmw {
+
+// Tooth-gingiva margin detection (M9, D71). A binary tooth/gingiva labelling of the arch; the margin
+// line is its boundary (label_boundary_edges), the same definition used for the ground truth.
+//   HeightPlane      tooth = height along the occlusal axis above a quantile (naive baseline)
+//   GeodesicVoronoi  multi-source Dijkstra from tooth seeds (detected cusp tips + highest vertices) and
+//                    gingiva seeds (the scan's cut boundary + lowest vertices); each vertex takes the label
+//                    of the front that reaches it first. Edge cost l * (1 + valley_weight * s), where
+//                    s = max(0, -kappa_min) of the smoothed minimum principal curvature (valley strength):
+//                    fronts stall in concave creases, so they meet in the cervical crease.
+// Only the largest component (the arch) is labelled; everything else is gingiva.
+struct MarginParams {
+    enum class Method { HeightPlane, GeodesicVoronoi };
+    Method method = Method::GeodesicVoronoi;
+    double plane_quantile = 0.5;     // HeightPlane: tooth above this height quantile
+    double valley_weight = 10.0;     // alpha (mm); 0 = plain geodesic Voronoi
+    double curvature_scale = 0.3;    // sigma (mm) for smoothing kappa_min
+    double gingiva_quantile = 0.15;  // gingiva seeds: arch vertices below this height quantile
+    double tooth_quantile = 0.9;     // tooth seeds: arch vertices above this height quantile
+    bool cusp_seeds = true;          // also seed teeth at detected cusp tips (detect_cusps, D68 point)
+};
+
+struct MarginResult {
+    std::vector<std::uint8_t> tooth;  // per vertex: 1 tooth, 0 gingiva
+    std::vector<Edge> margin;         // boundary edges between tooth and gingiva
+};
+
+MarginResult detect_margin(const HalfEdgeMesh& mesh, const MarginParams& params);
+
+// The operating point chosen on training scans (D73). Single source of truth for viewer and tools.
+MarginParams margin_operating_point();
+
+// --- Building blocks (detect_margin composes these; the evaluation tool caches them per scan) ---
+struct MarginInputs {
+    std::vector<std::uint8_t> arch;          // largest component
+    std::vector<double> height;              // along the occlusal axis
+    std::vector<double> sorted_arch_height;  // ascending, arch vertices only
+    std::vector<std::uint32_t> cut_vertices; // boundary of the arch (the scan's cut through the gingiva)
+    std::vector<std::uint32_t> cusp_tips;    // detect_cusps at the D68 operating point (if requested)
+    std::vector<double> kmin;                // minimum principal curvature (0 where undefined)
+};
+MarginInputs margin_inputs(const HalfEdgeMesh& mesh, bool with_cusps);
+
+// s = max(0, -kappa_min) after smoothing kappa_min to scale sigma.
+std::vector<double> valley_strength(const DecOperators& ops, std::span<const double> kmin, double sigma);
+
+// The labelling step for either method, given precomputed inputs (valley ignored for HeightPlane).
+std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& mesh, const MarginInputs& in, std::span<const double> valley,
+                                        const MarginParams& params);
+
+// Edges whose endpoints carry different binary labels (the margin line for tooth/gingiva labels).
+std::vector<Edge> label_boundary_edges(const HalfEdgeMesh& mesh, std::span<const std::uint8_t> label);
+
+// Boundary-to-boundary comparison in mm (D72): margin edges are sampled at their midpoints, and each
+// sample is matched to its nearest sample on the other line (spatial hash).
+struct BoundaryMetrics {
+    double assd = 0.0;           // average symmetric surface distance
+    double hd95 = 0.0;           // max of the two directed 95th-percentile distances
+    double hausdorff = 0.0;      // max of the two directed max distances
+    double f1_025 = 0.0, f1_050 = 0.0;  // boundary F1 at 0.25 mm / 0.5 mm
+    std::size_t predicted = 0, truth = 0;  // sample counts
+};
+BoundaryMetrics compare_boundaries(std::span<const Vec3> predicted, std::span<const Vec3> truth);
+
+std::vector<Vec3> edge_midpoints(const HalfEdgeMesh& mesh, std::span<const Edge> edges);
+
+// Area-weighted IoU of the label-1 regions (weights: lumped vertex areas).
+double region_iou(std::span<const std::uint8_t> predicted, std::span<const std::uint8_t> truth, std::span<const double> area);
+
+}  // namespace dmw

@@ -23,6 +23,11 @@
           <button type="button" class="button" id="open-landmarks">Load cusp landmarks</button>
           <input type="file" id="landmarks" accept=".json" hidden />
         </div>
+        <div class="row">
+          <button type="button" class="button" id="detect-margin">Detect margin</button>
+          <button type="button" class="button" id="open-labels">Load tooth labels</button>
+          <input type="file" id="labels" accept=".json" hidden />
+        </div>
         <p class="hint">or drop a mesh on the view</p>
       </section>
 
@@ -48,6 +53,7 @@
           <label><input type="checkbox" value="vertices" checked /> <i data-swatch="vertices"></i> Non-manifold vertices</label>
           <label><input type="checkbox" value="handles" checked /> <i data-swatch="handles"></i> Handle loops</label>
           <label><input type="checkbox" value="cusps" checked /> <i data-swatch="cusps"></i> Cusp tips (detected) <i data-swatch="truth"></i> landmarks</label>
+          <label><input type="checkbox" value="margin" checked /> <i data-swatch="margin"></i> Margin line (detected) <i data-swatch="truth"></i> labels</label>
           <label><input type="checkbox" value="wireframe" /> Wireframe</label>
         </div>
       </section>

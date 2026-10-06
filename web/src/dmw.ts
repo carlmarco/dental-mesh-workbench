@@ -38,6 +38,14 @@ export interface Stats {
   };
 }
 
+export interface MarginMetrics {
+  assd: number; // average symmetric surface distance, mm
+  hd95: number; // mm
+  f1_025: number; // boundary F1 at 0.25 mm
+  f1_050: number; // boundary F1 at 0.5 mm
+  iou: number; // area-weighted tooth-region IoU
+}
+
 // JS-owned copies of everything the viewer needs (safe across later WASM calls).
 export interface MeshData {
   positions: Float32Array; // xyz per vertex
@@ -119,6 +127,27 @@ export class Dmw {
     const error = this.session.detectCusps();
     if (error) throw new Error(error);
     return { vertices: (this.session.cusps() as Uint32Array).slice(), millis: performance.now() - t0 };
+  }
+
+  // Tooth-gingiva margin (operating point chosen on training scans, D73).
+  detectMargin(): { edges: Uint32Array; millis: number } {
+    const t0 = performance.now();
+    const error = this.session.detectMargin();
+    if (error) throw new Error(error);
+    return { edges: (this.session.marginEdges() as Uint32Array).slice(), millis: performance.now() - t0 };
+  }
+
+  // Metrics against ground-truth tooth flags (1 byte per vertex), computed by the C++ metric code.
+  compareMargin(toothFlags: Uint8Array): { metrics: MarginMetrics; truthEdges: Uint32Array } {
+    const ptr = this.module._malloc(toothFlags.length);
+    try {
+      this.module.HEAPU8.set(toothFlags, ptr); // read HEAPU8 after malloc (memory may have grown)
+      const json = JSON.parse(this.session.compareMargin(ptr, toothFlags.length)) as MarginMetrics & { error?: string };
+      if (json.error) throw new Error(json.error);
+      return { metrics: json, truthEdges: (this.session.truthMarginEdges() as Uint32Array).slice() };
+    } finally {
+      this.module._free(ptr);
+    }
   }
 
   // embind objects live in C++ memory and are not garbage-collected.

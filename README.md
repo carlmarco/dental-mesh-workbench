@@ -20,7 +20,7 @@ and never uploaded.
 | Distance | Heat-method geodesics on DEC operators (L = −d₀ᵀ⋆₁d₀), hand-written sparse LDLᵀ; Dijkstra baseline | Crane, Weischedel, Wardetzky 2013 |
 | Handles | Homology handle loops (2g per component) via tree-cotree with the greedy shortest system of loops; boundaries capped | Eppstein 2003; Erickson & Whittlesey 2005 |
 | Robustness | Intrinsic Delaunay Laplacian via intrinsic edge flips: all cotan weights ≥ 0 | Bobenko & Springborn 2007; Fisher, Springborn, Bobenko, Schröder 2007 |
-| Dental scans | Cusp-tip detection by occlusal prominence, evaluated on 3DTeethLand landmarks; manifold analysis view for real scans | |
+| Dental scans | Cusp-tip detection by occlusal prominence; tooth-gingiva margin by concavity-weighted geodesic Voronoi; evaluated on held-out Teeth3DS / 3DTeethLand data | |
 | Viewer | Overlays for defects, curvature, components, and click-to-pick geodesic isolines; cotan vs intrinsic Delaunay toggle | |
 
 ## Architecture
@@ -109,12 +109,15 @@ Accuracy figures are mean absolute error. Dates, settings and the full tables ar
 Scans are not redistributed. Only aggregate metrics are reported, with attribution to Ben-Hamadou et al.
 (Teeth3DS+) and the 3DTeethLand challenge.
 
-| Measurement (held-out 3DTeethLand test set: 100 scans, 2,343 cusp landmarks) | Result |
+| Measurement (cusps: held-out 3DTeethLand test set, 100 scans, 2,343 landmarks) | Result |
 |---|---|
 | Cusp tips, occlusal prominence (tuned on 67 training scans) | F1 **0.631** at 1 mm (precision 0.553, recall 0.736); median localization error **0.44 mm** |
 | Naive baseline: raw mean-curvature maxima | F1 0.112 at 1 mm (200 detections per scan) |
 | Scan topology (median 106k vertices) | only 9/100 arches are genus 0; handle-loop count = 2·Σg on every scan |
+| Tooth-gingiva margin, concavity-weighted Voronoi (held-out Teeth3DS test split: 300 scans) | ASSD **0.551 mm** (median 0.450), HD95 3.27 mm, boundary F1 **0.815** at 0.5 mm, tooth IoU 0.841 |
+| Naive baseline: plane cut at a height quantile | ASSD 1.663 mm, boundary F1 0.208 at 0.5 mm |
 | Cusp detection time, 93.6k-vertex scan | 383 ms native, 459 ms in the browser (WASM), after a 4-8× optimization (D70) |
+| Margin detection time, 113.7k-vertex scan | 733 ms in the browser (WASM), including cusp seeding |
 
 ## Performance
 
@@ -162,6 +165,8 @@ breakdown comes from `dmw_bench`.
   (D10). Topology diagnostics still work on any mesh.
 - **Handle loops are valid generators, not the shortest in their homology class.** Their lengths are upper bounds
   on handle size (measured 3.5× the tight cycle on a synthetic handle, D64).
+- **The margin has a long tail:** HD95 is 3.27 mm on average, so some stretches go badly wrong. Which scans and
+  why hasn't been analysed yet (D73).
 - **Cusp detection over-detects on anterior teeth:** incisal edges score as tips but carry no cusp
   landmarks. It's the main precision loss, and tooth-type awareness is the next lever (D68).
 - **Boundary conditions:** the heat method uses Neumann conditions only (D48).

@@ -16,6 +16,7 @@ export interface Layers {
   vertices: boolean;
   handles: boolean;
   cusps: boolean;
+  margin: boolean;
   wireframe: boolean;
 }
 
@@ -27,6 +28,7 @@ export const LAYER_COLORS = {
   handles: 0x16a34a,
   cusps: 0xf97316,
   truth: 0x22d3ee,
+  margin: 0xfacc15,
 } as const;
 
 const EXCLUDED = 0xffffffff;
@@ -66,6 +68,8 @@ export class Viewer {
   private distance: Float32Array | null = null;
   private cuspPoints: Float32Array | null = null;  // detected tips, xyz
   private truthPoints: Float32Array | null = null; // loaded landmarks, xyz
+  private marginEdges: Uint32Array | null = null;
+  private truthMarginEdges: Uint32Array | null = null;
   private source: number | null = null;
   private surface: THREE.Mesh | null = null;
   private readonly isolines = isolineTexture();
@@ -119,6 +123,11 @@ export class Viewer {
   setCusps(detected: Float32Array | null, truth: Float32Array | null): void {
     this.cuspPoints = detected;
     this.truthPoints = truth;
+  }
+
+  setMargin(predicted: Uint32Array | null, truth: Uint32Array | null): void {
+    this.marginEdges = predicted;
+    this.truthMarginEdges = truth;
   }
 
   // Distance field for the "geodesic" overlay (null clears it).
@@ -205,6 +214,8 @@ export class Viewer {
     if (layers.misoriented) this.addEdges(d.misorientedEdges, LAYER_COLORS.misoriented, 4, true);
     if (layers.nonmanifold) this.addEdges(d.nonmanifoldEdges, LAYER_COLORS.nonmanifold, 5, true);
     if (layers.handles) this.addEdges(d.handleEdges, LAYER_COLORS.handles, 4, true);
+    if (layers.margin && this.truthMarginEdges?.length) this.addEdges(this.truthMarginEdges, LAYER_COLORS.truth, 2.5, true);
+    if (layers.margin && this.marginEdges?.length) this.addEdges(this.marginEdges, LAYER_COLORS.margin, 3.5, true);
     if (layers.cusps && this.cuspPoints?.length) this.addXyzPoints(this.cuspPoints, LAYER_COLORS.cusps, 11);
     if (layers.cusps && this.truthPoints?.length) this.addXyzPoints(this.truthPoints, LAYER_COLORS.truth, 7);
     if (overlay === "geodesic" && this.source !== null) {

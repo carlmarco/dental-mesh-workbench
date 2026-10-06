@@ -34,6 +34,7 @@ let cuspXyz: Float32Array | null = null;
 let truthXyz: Float32Array | null = null;
 let cuspInfo = "";
 let cuspMillis: number | null = null;
+let marginInfo = "";
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
 const rgb = ([r, g, b]: number[]) => `rgb(${r * 255}, ${g * 255}, ${b * 255})`;
@@ -50,7 +51,7 @@ function overlay(): Overlay {
 }
 function layers(): Layers {
   const on = (v: string) => document.querySelector<HTMLInputElement>(`#layers input[value="${v}"]`)!.checked;
-  return { boundary: on("boundary"), nonmanifold: on("nonmanifold"), misoriented: on("misoriented"), vertices: on("vertices"), handles: on("handles"), cusps: on("cusps"), wireframe: on("wireframe") };
+  return { boundary: on("boundary"), nonmanifold: on("nonmanifold"), misoriented: on("misoriented"), vertices: on("vertices"), handles: on("handles"), cusps: on("cusps"), margin: on("margin"), wireframe: on("wireframe") };
 }
 
 // Heat-method distance from `source`; the first query on a mesh also factors the solver.
@@ -76,6 +77,8 @@ function display(d: MeshData, keepCamera: boolean): void {
       cuspXyz = truthXyz = null;
       cuspInfo = "";
       cuspMillis = null;
+      marginInfo = "";
+      viewer.setMargin(null, null);
       viewer.setCusps(null, null);
     }
   }
@@ -164,6 +167,7 @@ function renderStats(s: Stats, millis: number): void {
     ${s.handleLoops.count ? `<p class="hint">Handle loops: shortest ${s.handleLoops.lengths.slice(0, 5).map(fmt).join(", ")}${s.handleLoops.count > 5 ? ", …" : ""} (mesh units; upper bounds on handle size).</p>` : ""}
     ${s.excludedFaces ? `<p class="hint">${s.excludedFaces} faces at defects excluded from the half-edge analysis view (D69).</p>` : ""}
     ${cuspInfo ? `<h2>Cusps</h2><p>${cuspInfo}</p>` : ""}
+    ${marginInfo ? `<h2>Margin</h2><p>${marginInfo}</p>` : ""}
     <h2>Curvature</h2>${curv}`;
 }
 
@@ -241,6 +245,38 @@ landmarkInput.addEventListener("change", async () => {
     updateCuspInfo();
   } catch (e) {
     errorBox.textContent = `Could not read landmarks: ${(e as Error).message}`;
+  }
+});
+
+let marginEdges: Uint32Array | null = null;
+byId<HTMLButtonElement>("detect-margin").addEventListener("click", () => {
+  if (!data) return;
+  try {
+    const r = dmw.detectMargin();
+    marginEdges = r.edges;
+    marginInfo = `${r.edges.length / 2} margin edges in ${r.millis.toFixed(0)} ms`;
+    viewer.setMargin(marginEdges, null);
+    display(data, true);
+  } catch (e) {
+    errorBox.textContent = (e as Error).message;
+  }
+});
+const labelInput = byId<HTMLInputElement>("labels");
+byId<HTMLButtonElement>("open-labels").addEventListener("click", () => labelInput.click());
+labelInput.addEventListener("change", async () => {
+  const f = labelInput.files?.[0];
+  if (!f || !data) return;
+  try {
+    if (!marginEdges) throw new Error("detect the margin first");
+    // Teeth3DS labels: FDI tooth number per vertex, 0 = gingiva.
+    const labels = (JSON.parse(await f.text()) as { labels: number[] }).labels;
+    const flags = Uint8Array.from(labels, (l) => (l !== 0 ? 1 : 0));
+    const { metrics: m, truthEdges } = dmw.compareMargin(flags);
+    marginInfo = `${marginEdges.length / 2} margin edges · vs labels: ASSD ${m.assd.toFixed(3)} mm, HD95 ${m.hd95.toFixed(2)} mm, boundary F1@0.5 mm ${m.f1_050.toFixed(2)}, tooth IoU ${m.iou.toFixed(3)}`;
+    viewer.setMargin(marginEdges, truthEdges);
+    display(data, true);
+  } catch (e) {
+    errorBox.textContent = `Could not compare: ${(e as Error).message}`;
   }
 });
 

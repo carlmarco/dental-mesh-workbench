@@ -183,6 +183,13 @@ std::vector<std::uint32_t> non_max_suppression(std::span<const Vec3> positions, 
     return kept;
 }
 
+CuspParams cusp_operating_point() {
+    CuspParams p;
+    p.method = CuspParams::Method::OcclusalProminence;
+    p.curvature_scale = 0.5, p.prominence_scale = 4.0, p.height_quantile = 0.5, p.threshold = 1.3, p.nms_radius = 3.5;
+    return p;
+}
+
 // CG tolerance for the detector's two smoothing solves (D70): measured on a 93.6k-vertex scan, 1e-4
 // gives a max prominence error of 5e-4 mm (threshold 1.3 mm; scanner accuracy 10-90 um) at 4x less
 // time than 1e-8. Valid because prominence is solved directly (small right-hand side).

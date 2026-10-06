@@ -34,6 +34,11 @@ struct CuspDetection {
 
 CuspDetection detect_cusps(const HalfEdgeMesh& mesh, const CuspParams& params);
 
+// The operating point chosen on the 67 training scans (D68): occlusal prominence, sigma 0.5 mm,
+// R 4.0 mm, height quantile 0.5, threshold 1.3 mm, NMS radius 3.5 mm. Single source of truth for
+// the viewer, the margin seeds and the tools.
+CuspParams cusp_operating_point();
+
 // --- Building blocks (exposed for testing) -------------------------------------------------
 
 // Unit occlusal axis: the smallest-variance principal axis of the vertices in `mask` (an arch is

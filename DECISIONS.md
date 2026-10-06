@@ -511,3 +511,30 @@ Each entry: the choice, the alternatives considered, and the reason.
   1.3 mm; scanner accuracy 10-90 um per the Teeth3DS+ paper).
 - Measured on a 93.6k-vertex scan: native detect_cusps 1,525 -> 383 ms (4.0x); in the browser (WASM)
   3,685 -> 459 ms (8x). Held-out test metrics identical to 3 decimals after the change.
+
+## D71. Margin detection: concavity-weighted geodesic Voronoi
+- Binary tooth/gingiva labelling; the margin is its boundary (same definition as the ground truth). Seeds: teeth at
+  detected cusp tips (D68) and the highest 10% of the arch; gingiva at the scan's cut boundary and the lowest 15%.
+  Two-label multi-source Dijkstra with edge cost l * (1 + alpha * s), s = max(0, -kappa_min). Baseline: a plane
+  cut at a height quantile along the occlusal axis. Synthetic test: crown with a concave crease at its base; the
+  weighted Voronoi lands within 0.15 mm ASSD and at least 2x closer than a plane cut.
+- Building blocks (margin_inputs, valley_strength, margin_labels) are shared by the library and the evaluation tool;
+  operating points come from single functions (cusp_operating_point, margin_operating_point).
+
+## D72. Margin metrics
+- Margin edges sampled at midpoints; nearest-neighbour distances via a uniform grid with ring search. ASSD, HD95,
+  Hausdorff, boundary F1 at 0.25 and 0.5 mm, area-weighted tooth IoU. Per-scan, averaged over scans.
+
+## D73. Margin evaluation (2026-10-06)
+- Data: Teeth3DS labels (FDI per vertex, 0 = gingiva). Range-probing the zip central directories (803 KB fetched)
+  showed data parts 5 and 6 hold the whole Teeth3DS test split (300 each), parts 1-4 only training; part 5 was
+  downloaded (author approved).
+- Tuning: 60 training scans (every 5th of part 1), three sweeps until the optimum was interior or at a natural end:
+  best alpha 2560 (converged: 1280 -> 2560 changes ASSD by 0.004 mm), sigma 0 (raw kappa_min; the end of the
+  range: the cervical crease is narrow and smoothing blurs it), gingiva quantile 0.15, tooth quantile 0.9, cusp
+  seeds on. Training ASSD 0.647 mm. Without cusp seeds: 2.54 / 1.91 mm (alpha 0 / 10).
+- **Held-out test (300 scans of the Teeth3DS test split, run once):** plane cut ASSD 1.663 mm, F1@0.5 0.208, IoU
+  0.670; Voronoi without concavity weighting ASSD 1.781 mm, F1@0.5 0.214, IoU 0.682; **concavity-weighted Voronoi
+  ASSD 0.551 mm (median 0.450), HD95 3.27 mm, F1@0.25 0.761, F1@0.5 0.815, tooth IoU 0.841.** Library path
+  reproduces all three exactly. Example test scan EJWZZZRF_lower in the browser: ASSD 0.257 mm, F1@0.5 0.92, 733 ms.
+- Not yet analysed: which scans produce the HD95 tail (3.27 mm mean).

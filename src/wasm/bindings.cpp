@@ -14,6 +14,7 @@
 
 #include "core/curvature.h"
 #include "core/cusps.h"
+#include "core/margin.h"
 #include "core/generate.h"
 #include "core/geodesic.h"
 #include "core/halfedge.h"
@@ -93,12 +94,42 @@ public:
     // Cusp tips with detector C at the operating point chosen on the training set (D68).
     std::string detectCusps() {
         if (!he_mesh_) return "cusp detection needs a manifold analysis view (" + he_error_ + ")";
-        CuspParams p;  // occlusal prominence
-        p.curvature_scale = 0.5, p.prominence_scale = 4.0, p.height_quantile = 0.5, p.threshold = 1.3, p.nms_radius = 3.5;
-        cusps_ = detect_cusps(*he_mesh_, p).vertices;
+        cusps_ = detect_cusps(*he_mesh_, cusp_operating_point()).vertices;
         return {};
     }
-    val cusps() const { return view(cusps_); }  // uint32 vertex ids, strongest first  // uint32 vertex pairs of all handle loops
+    val cusps() const { return view(cusps_); }  // uint32 vertex ids, strongest first
+
+    // Tooth-gingiva margin at the training-chosen operating point (D73).
+    std::string detectMargin() {
+        if (!he_mesh_) return "margin detection needs a manifold analysis view (" + he_error_ + ")";
+        const MarginResult r = detect_margin(*he_mesh_, margin_operating_point());
+        predicted_tooth_ = r.tooth;
+        margin_edges_.clear();
+        for (const Edge& e : r.margin) margin_edges_.insert(margin_edges_.end(), {e.v0, e.v1});
+        return {};
+    }
+    val marginEdges() const { return view(margin_edges_); }  // uint32 vertex pairs
+
+    // Compare the predicted margin with ground-truth tooth flags (1 byte per vertex, 1 = tooth) that JS
+    // copied into WASM memory at `ptr`. Same metric code as tools/margin_eval (D72). Returns JSON.
+    std::string compareMargin(std::uintptr_t ptr, std::size_t len) {
+        if (!he_mesh_ || predicted_tooth_.empty()) return "{\"error\":\"run detectMargin first\"}";
+        if (len != mesh_.positions.size()) return "{\"error\":\"label count does not match vertex count\"}";
+        const std::span<const std::uint8_t> truth(reinterpret_cast<const std::uint8_t*>(ptr), len);
+        const auto gt_edges = label_boundary_edges(*he_mesh_, truth);
+        truth_edges_.clear();
+        for (const Edge& e : gt_edges) truth_edges_.insert(truth_edges_.end(), {e.v0, e.v1});
+        std::vector<Edge> pred;
+        for (std::size_t i = 0; i + 1 < margin_edges_.size(); i += 2) pred.push_back({margin_edges_[i], margin_edges_[i + 1]});
+        const BoundaryMetrics b = compare_boundaries(edge_midpoints(*he_mesh_, pred), edge_midpoints(*he_mesh_, gt_edges));
+        const double iou = region_iou(predicted_tooth_, truth, build_dec(*he_mesh_).star0);
+        std::ostringstream o;
+        o.precision(6);
+        o << "{\"assd\":" << b.assd << ",\"hd95\":" << b.hd95 << ",\"f1_025\":" << b.f1_025 << ",\"f1_050\":" << b.f1_050
+          << ",\"iou\":" << iou << "}";
+        return o.str();
+    }
+    val truthMarginEdges() const { return view(truth_edges_); }  // uint32 vertex pairs of all handle loops
 
     // Switch curvature and geodesics between the cotan and the intrinsic Delaunay Laplacian.
     void setIntrinsicDelaunay(bool on) {
@@ -196,6 +227,9 @@ private:
         he_mesh_ = he.ok() ? std::make_unique<HalfEdgeMesh>(std::move(he.mesh)) : nullptr;
         distance_.clear();
         cusps_.clear();
+        predicted_tooth_.clear();
+        margin_edges_.clear();
+        truth_edges_.clear();
         update_curvature();
         // Handle loops (M8b): 2g generator cycles per component, shortest first (lengths are upper
         // bounds on handle size, D64). Stored as line segments for the viewer.
@@ -259,7 +293,8 @@ private:
     std::vector<std::uint32_t> indices_, face_component_, boundary_edges_, nonmanifold_edges_,
         misoriented_edges_, handle_edges_;
     std::vector<double> handle_lengths_;
-    std::vector<std::uint32_t> cusps_;
+    std::vector<std::uint32_t> cusps_, margin_edges_, truth_edges_;
+    std::vector<std::uint8_t> predicted_tooth_;
 };
 
 }  // namespace
@@ -281,6 +316,10 @@ EMSCRIPTEN_BINDINGS(dmw) {
         .function("handleEdges", &Session::handleEdges)
         .function("detectCusps", &Session::detectCusps)
         .function("cusps", &Session::cusps)
+        .function("detectMargin", &Session::detectMargin)
+        .function("marginEdges", &Session::marginEdges)
+        .function("compareMargin", &Session::compareMargin)
+        .function("truthMarginEdges", &Session::truthMarginEdges)
         .function("setIntrinsicDelaunay", &Session::setIntrinsicDelaunay)
         .function("geodesic", &Session::geodesic)
         .function("distance", &Session::distance)

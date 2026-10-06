@@ -17,3 +17,10 @@ target_compile_options(scan_qa PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Ws
 add_executable(cusp_eval cusp_eval.cpp)
 target_link_libraries(cusp_eval PRIVATE dmw_core)
 target_compile_options(cusp_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Margin evaluation (local, license-restricted data; D60, D71-D73):
+#   ./build-release/tools/margin_eval sweep data/data_part_1 5
+#   ./build-release/tools/margin_eval test  data/data_part_5
+add_executable(margin_eval margin_eval.cpp)
+target_link_libraries(margin_eval PRIVATE dmw_core)
+target_compile_options(margin_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
