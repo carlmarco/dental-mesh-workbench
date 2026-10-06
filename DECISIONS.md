@@ -560,3 +560,22 @@ Each entry: the choice, the alternatives considered, and the reason.
   0.896. That is the ceiling for seed filtering, and it needs a better tooth/gingiva discriminator than height
   (local shape features or a small learned classifier, D61). Even the oracle leaves the other failure modes
   (distal ends, handles).
+
+## D76. Cusp-seed classifier (logistic regression) and the second margin test evaluation
+- Model: logistic regression trained by Newton/IRLS with L2 (core/learn), on six label-free features per seed:
+  prominence, height quantile, vertex normal . occlusal axis, distance to the scan cut, smoothed mean and Gaussian
+  curvature. Split of part 1 by index % 5: {0,1,2} training (180 scans, 5,409 seeds, 7.9% on gingiva), {3,4}
+  validation (120 scans, 3,572 seeds, 6.8% on gingiva).
+- Seed classification ROC AUC: training 0.904, validation 0.871. Strongest feature: normal . occlusal axis
+  (single-feature AUC 0.849, standardized weight +1.49): real cusps face occlusally, gingival bumps sideways.
+  Height quantile weight +0.07 (consistent with D75's failed height gate).
+- Margin on validation (paired vs the operating point): threshold 0.5: -0.024 mm (t = -4.1, worse on 2/120);
+  0.8: -0.030 (t = -3.4, worse 23); 0.85: -0.033 (t = -2.8, worse 34); 0.9: -0.004; 0.95: +0.161. **Chosen 0.5
+  for reliability** (fewest regressions, strongest t; 0.85's mean advantage of 0.009 mm is not distinguishable);
+  criterion stated explicitly because it was not pre-registered. Oracle on the same scans: -0.101 mm.
+- **Second test evaluation (disclosed; the method was developed on validation only):** 300 scans: ASSD 0.551 ->
+  **0.528 mm** (median 0.450 -> 0.428), HD95 3.27 -> 3.18, F1@0.5 0.815 -> 0.819, IoU 0.841 -> **0.869**; paired
+  -0.024 mm, t = -5.3, better on 130, worse on 5 of 300. Baseline rows reproduce the first test run exactly.
+- Licence handling: the model file (12 numbers + names) stays local in git-ignored data/models; the public build
+  and viewer keep the classifier-free operating point until the author decides whether trained weights from
+  CC BY-NC-ND data may be published.

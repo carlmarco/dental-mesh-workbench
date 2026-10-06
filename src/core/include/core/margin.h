@@ -6,6 +6,7 @@
 
 #include "core/dec.h"
 #include "core/halfedge.h"
+#include "core/learn.h"
 #include "core/topology.h"
 
 namespace dmw {
@@ -29,6 +30,9 @@ struct MarginParams {
     double tooth_quantile = 0.9;     // tooth seeds: arch vertices above this height quantile
     bool cusp_seeds = true;          // also seed teeth at detected cusp tips (detect_cusps, D68 point)
     double cusp_seed_quantile = 0.0; // keep only cusp seeds above this arch-height quantile (D75; 0 = all)
+    // Seed classifier (D76): drop cusp seeds with P(tooth) < seed_threshold. Non-owning; null = off.
+    const LogisticModel* seed_model = nullptr;
+    double seed_threshold = 0.5;
 };
 
 struct MarginResult {
@@ -48,9 +52,16 @@ struct MarginInputs {
     std::vector<double> sorted_arch_height;  // ascending, arch vertices only
     std::vector<std::uint32_t> cut_vertices; // boundary of the arch (the scan's cut through the gingiva)
     std::vector<std::uint32_t> cusp_tips;    // detect_cusps at the D68 operating point (if requested)
+    std::vector<double> seed_features;       // kSeedFeatureCount per cusp tip, row-major (D76)
     std::vector<double> kmin;                // minimum principal curvature (0 where undefined)
 };
 MarginInputs margin_inputs(const HalfEdgeMesh& mesh, bool with_cusps);
+
+// Label-free features of each cusp seed for the seed classifier (D76), in this order:
+//   prominence (mm), height quantile in the arch (0..1), vertex normal . occlusal axis,
+//   distance to the scan's cut boundary (mm), smoothed mean curvature (1/mm), smoothed Gaussian (1/mm^2).
+inline constexpr std::size_t kSeedFeatureCount = 6;
+const std::vector<std::string>& seed_feature_names();
 
 // s = max(0, -kappa_min) after smoothing kappa_min to scale sigma.
 std::vector<double> valley_strength(const DecOperators& ops, std::span<const double> kmin, double sigma);

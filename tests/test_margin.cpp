@@ -94,3 +94,28 @@ TEST_CASE("margin: concavity-weighted Voronoi snaps to the crease; a plane cut l
     CHECK(mv.assd < 0.5 * mp.assd);  // and much closer than the plane cut
     CHECK(region_iou(rv.tooth, truth, area) > 0.95);
 }
+
+TEST_CASE("margin: seed classifier hook - reject-all equals no cusp seeds, accept-all equals default", "[margin]") {
+    // On the bumpy crown patch there are detected cusp seeds; a constant model fixes P(tooth).
+    const auto mesh = he(crown_patch());
+    const MarginInputs in = margin_inputs(mesh, true);
+    REQUIRE_FALSE(in.cusp_tips.empty());  // otherwise both checks below would pass vacuously
+    REQUIRE(in.seed_features.size() == in.cusp_tips.size() * kSeedFeatureCount);
+    LogisticModel constant;
+    constant.mean.assign(kSeedFeatureCount, 0.0);
+    constant.scale.assign(kSeedFeatureCount, 1.0);
+    constant.weights.assign(kSeedFeatureCount, 0.0);
+
+    MarginParams base = margin_operating_point();
+    MarginParams off = base;
+    off.cusp_seeds = false;
+    MarginParams reject = base, accept = base;
+    constant.bias = -20.0;  // P ~ 0
+    reject.seed_model = &constant;
+    const auto rejected = margin_labels(mesh, in, {}, reject);
+    CHECK(rejected == margin_labels(mesh, in, {}, off));
+    LogisticModel always = constant;
+    always.bias = 20.0;  // P ~ 1
+    accept.seed_model = &always;
+    CHECK(margin_labels(mesh, in, {}, accept) == margin_labels(mesh, in, {}, base));
+}

@@ -30,3 +30,9 @@ target_compile_options(margin_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion
 add_executable(margin_analyze margin_analyze.cpp)
 target_link_libraries(margin_analyze PRIVATE dmw_core)
 target_compile_options(margin_analyze PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Cusp-seed classifier training (local data; model file stays local, D76):
+#   ./build-release/tools/seed_train data/data_part_1 data/models/cusp_seed_logistic.json
+add_executable(seed_train seed_train.cpp)
+target_link_libraries(seed_train PRIVATE dmw_core)
+target_compile_options(seed_train PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)

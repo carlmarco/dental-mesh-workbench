@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/curvature.h"
+#include "core/dec.h"
 #include "core/cusps.h"
 #include "detail/hash.h"
 #include "detail/vec.h"
@@ -56,6 +57,12 @@ std::vector<double> nearest_distances(std::span<const Vec3> query, std::span<con
 }
 
 }  // namespace
+
+const std::vector<std::string>& seed_feature_names() {
+    static const std::vector<std::string> names{"prominence_mm", "height_quantile", "normal_dot_axis",
+                                                "distance_to_cut_mm", "smoothed_mean_curvature", "smoothed_gaussian_curvature"};
+    return names;
+}
 
 std::vector<Edge> label_boundary_edges(const HalfEdgeMesh& m, std::span<const std::uint8_t> label) {
     std::vector<Edge> out;
@@ -125,10 +132,41 @@ MarginInputs margin_inputs(const HalfEdgeMesh& m, bool with_cusps) {
     for (std::uint32_t h = 0; h < m.origin.size(); ++h) {
         if (m.twin[h] == kInvalid && in.arch[m.origin[h]]) in.cut_vertices.push_back(m.origin[h]);
     }
-    if (with_cusps) in.cusp_tips = detect_cusps(m, cusp_operating_point()).vertices;
     const CurvatureField curv = compute_curvature(m);
     in.kmin.resize(nv);
     for (std::size_t v = 0; v < nv; ++v) in.kmin[v] = std::isfinite(curv.k2[v]) ? curv.k2[v] : 0.0;
+    if (with_cusps) {
+        const CuspDetection cusps = detect_cusps(m, cusp_operating_point());
+        in.cusp_tips = cusps.vertices;
+        // Seed features (D76).
+        const DecOperators ops = build_dec(m);
+        std::vector<double> mean(nv), gauss(nv);
+        for (std::size_t v = 0; v < nv; ++v) {
+            mean[v] = std::isfinite(curv.mean[v]) ? curv.mean[v] : 0.0;
+            gauss[v] = std::isfinite(curv.gaussian[v]) ? curv.gaussian[v] : 0.0;
+        }
+        const auto smooth_mean = diffuse(ops, mean, 0.5, 1e-4), smooth_gauss = diffuse(ops, gauss, 0.5, 1e-4);
+        std::vector<Vec3> normal(nv, Vec3{});  // area-weighted vertex normals
+        for (std::size_t f = 0; f < m.origin.size() / 3; ++f) {
+            const std::uint32_t a = m.origin[3 * f], b = m.origin[3 * f + 1], c = m.origin[3 * f + 2];
+            const Vec3 n = cross(m.positions[b] - m.positions[a], m.positions[c] - m.positions[a]);
+            normal[a] += n, normal[b] += n, normal[c] += n;
+        }
+        std::vector<Vec3> tips, cut;
+        for (std::uint32_t v : in.cusp_tips) tips.push_back(m.positions[v]);
+        for (std::uint32_t v : in.cut_vertices) cut.push_back(m.positions[v]);
+        const auto to_cut = nearest_distances(tips, cut, 1.0);
+        const auto& hs = in.sorted_arch_height;
+        for (std::size_t i = 0; i < in.cusp_tips.size(); ++i) {
+            const std::uint32_t v = in.cusp_tips[i];
+            const double nn = norm(normal[v]);
+            const double quant = hs.empty() ? 0.0
+                                            : double(std::lower_bound(hs.begin(), hs.end(), in.height[v]) - hs.begin()) / double(hs.size());
+            in.seed_features.insert(in.seed_features.end(),
+                                    {cusps.scores[i], quant, nn > 0.0 ? dot(normal[v], axis) / nn : 0.0,
+                                     std::isfinite(to_cut[i]) ? to_cut[i] : 100.0, smooth_mean[v], smooth_gauss[v]});
+        }
+    }
     return in;
 }
 
@@ -160,8 +198,15 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     for (std::uint32_t v : in.cut_vertices) label[v] = 0;
     if (p.cusp_seeds) {
         const double seed_gate = q(p.cusp_seed_quantile);
-        for (std::uint32_t v : in.cusp_tips) {
-            if (p.cusp_seed_quantile <= 0.0 || in.height[v] >= seed_gate) label[v] = 1;
+        for (std::size_t i = 0; i < in.cusp_tips.size(); ++i) {
+            const std::uint32_t v = in.cusp_tips[i];
+            if (p.cusp_seed_quantile > 0.0 && in.height[v] < seed_gate) continue;
+            if (p.seed_model && in.seed_features.size() >= (i + 1) * kSeedFeatureCount &&
+                p.seed_model->probability(std::span<const double>(in.seed_features).subspan(i * kSeedFeatureCount, kSeedFeatureCount)) <
+                    p.seed_threshold) {
+                continue;  // the classifier says this seed is probably on gingiva (D76)
+            }
+            label[v] = 1;
         }
     }
     // Two-label multi-source Dijkstra: each vertex takes the label of the front that arrives first.

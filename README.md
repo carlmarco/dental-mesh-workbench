@@ -116,6 +116,7 @@ Scans are not redistributed. Only aggregate metrics are reported, with attributi
 | Scan topology (median 106k vertices) | only 9/100 arches are genus 0; handle-loop count = 2·Σg on every scan |
 | Tooth-gingiva margin, concavity-weighted Voronoi (held-out Teeth3DS test split: 300 scans) | ASSD **0.551 mm** (median 0.450), HD95 3.27 mm, boundary F1 **0.815** at 0.5 mm, tooth IoU 0.841 |
 | Naive baseline: plane cut at a height quantile | ASSD 1.663 mm, boundary F1 0.208 at 0.5 mm |
+| + learned cusp-seed filter (logistic regression; model kept local, see D76) | ASSD **0.528 mm**, tooth IoU 0.869; paired: better on 130 scans, worse on 5 of 300 |
 | Cusp detection time, 93.6k-vertex scan | 383 ms native, 459 ms in the browser (WASM), after a 4-8× optimization (D70) |
 | Margin detection time, 113.7k-vertex scan | 733 ms in the browser (WASM), including cusp seeding |
 
