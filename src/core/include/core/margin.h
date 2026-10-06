@@ -33,6 +33,8 @@ struct MarginParams {
     // Seed classifier (D76): drop cusp seeds with P(tooth) < seed_threshold. Non-owning; null = off.
     const LogisticModel* seed_model = nullptr;
     double seed_threshold = 0.5;
+    // DIAGNOSTICS ONLY (oracle experiments, D77): vertices flagged 1 may not seed teeth. Null = off.
+    const std::vector<std::uint8_t>* tooth_seed_veto = nullptr;
 };
 
 struct MarginResult {
@@ -85,6 +87,10 @@ struct BoundaryMetrics {
 BoundaryMetrics compare_boundaries(std::span<const Vec3> predicted, std::span<const Vec3> truth);
 
 std::vector<Vec3> edge_midpoints(const HalfEdgeMesh& mesh, std::span<const Edge> edges);
+
+// Distance from each query point to its nearest target point (uniform grid of cell size `cell`,
+// ring search). Infinity when `target` is empty.
+std::vector<double> nearest_point_distances(std::span<const Vec3> query, std::span<const Vec3> target, double cell = 0.5);
 
 // Area-weighted IoU of the label-1 regions (weights: lumped vertex areas).
 double region_iou(std::span<const std::uint8_t> predicted, std::span<const std::uint8_t> truth, std::span<const double> area);

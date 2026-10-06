@@ -25,13 +25,18 @@ using Method = MarginParams::Method;
 
 namespace {
 
+// Sentinel values of cusp_seed_quantile that select label-using ORACLE diagnostics (D75, D77).
+constexpr double kOracle = -1.0, kHeightOracle = -2.0, kBothOracles = -3.0;
+
 struct Config {
     MarginParams p;
     std::string label() const {
         char b[160];
         if (p.method == Method::HeightPlane) std::snprintf(b, sizeof b, "plane cut q=%.2f", p.plane_quantile);
+        else if (p.cusp_seed_quantile == kHeightOracle) std::snprintf(b, sizeof b, "ORACLE: height seeds on true gingiva removed (+clf)");
+        else if (p.cusp_seed_quantile == kBothOracles) std::snprintf(b, sizeof b, "ORACLE: all tooth seeds on true gingiva removed");
         else if (p.cusp_seed_quantile < 0.0) std::snprintf(b, sizeof b, "ORACLE: cusp seeds on true gingiva removed");
-        else if (p.seed_model) std::snprintf(b, sizeof b, "Voronoi + seed classifier, drop P(tooth) < %.2f", p.seed_threshold);
+        else if (p.seed_model) std::snprintf(b, sizeof b, "Voronoi + seed classifier %.2f, tq=%.2f", p.seed_threshold, p.tooth_quantile);
         else std::snprintf(b, sizeof b, "Voronoi alpha=%.0f sigma=%.2f gq=%.2f tq=%.2f cusps=%d seed_q=%.1f", p.valley_weight,
                            p.curvature_scale, p.gingiva_quantile, p.tooth_quantile, int(p.cusp_seeds), p.cusp_seed_quantile);
         return b;
@@ -69,24 +74,60 @@ const LogisticModel* g_seed_model = nullptr;  // set from the command line (D76)
 //   plane cut q 0.5 (ASSD 1.743); Voronoi without concavity weighting (alpha 0) to isolate its effect;
 //   chosen: alpha 2560, sigma 0 (raw kappa_min; the natural end of the range), gq 0.15, tq 0.9, cusp
 //   seeds (ASSD 0.647, median 0.461, F1@0.5 0.799, IoU 0.820; alpha gains converging: 1280 -> 2560 = -0.004).
-// Second test evaluation (2026-10-06, disclosed in D76): adds the seed classifier at threshold 0.5,
-// chosen on 120 validation scans for reliability (t = -4.1, worse on 2/120) over the best mean (0.85:
-// -0.009 mm better than 0.5, statistically indistinguishable, worse on 34/120).
+// Test evaluations (disclosed): #1 (D73) plane / alpha-0 / chosen Voronoi; #2 (D76) + seed classifier 0.5;
+// #3 (D77, 2026-10-06) no height seeds (tooth_quantile 1.0), confirmed on 120 validation and 60 independent
+// sweep scans before this run. Row 0 is the paired baseline.
 std::vector<Config> test_configs() {
-    std::vector<Config> c{{plane(0.5)}, {voronoi(0.0, 0.0, 0.15, 0.9, true)}, {voronoi(2560.0, 0.0, 0.15, 0.9, true)}};
+    std::vector<Config> c{{voronoi(2560.0, 0.0, 0.15, 0.9, true)}};      // public operating point before D77
     if (g_seed_model) {
-        MarginParams p = voronoi(2560.0, 0.0, 0.15, 0.9, true);
-        p.seed_model = g_seed_model, p.seed_threshold = 0.5;
-        c.push_back({p});
+        MarginParams old_clf = voronoi(2560.0, 0.0, 0.15, 0.9, true);
+        old_clf.seed_model = g_seed_model, old_clf.seed_threshold = 0.5;
+        c.push_back({old_clf});
+    }
+    c.push_back({voronoi(2560.0, 0.0, 0.15, 1.0, true)});               // new public operating point
+    if (g_seed_model) {
+        MarginParams new_clf = voronoi(2560.0, 0.0, 0.15, 1.0, true);
+        new_clf.seed_model = g_seed_model, new_clf.seed_threshold = 0.5;
+        c.push_back({new_clf});
     }
     return c;
 }
 
 // Validation experiments (D75): seed filtering by a stricter height gate, plus an ORACLE that drops cusp
 // seeds lying on true gingiva (uses labels: an upper bound on what seed filtering can gain, not a method).
-constexpr double kOracle = -1.0;
+std::string g_experiment = "thresholds";      // validate mode: which experiment (argv[6])
 std::vector<Config> validate_configs() {
     std::vector<Config> c;
+    if (g_experiment == "confirm") {
+        // D77: confirm the height-seed effect on independent scans (the 60 sweep scans).
+        MarginParams base = voronoi(2560.0, 0.0, 0.15, 0.9, true);
+        base.seed_model = g_seed_model, base.seed_threshold = 0.5;
+        c.push_back({base});
+        for (double tq : {0.98, 1.0}) {
+            MarginParams p = base;
+            p.tooth_quantile = tq;
+            c.push_back({p});
+        }
+        MarginParams no_clf = voronoi(2560.0, 0.0, 0.15, 1.0, true);  // does the classifier still matter?
+        c.push_back({no_clf});
+        return c;
+    }
+    if (g_experiment == "height") {
+        // D77: height-seed experiments on top of the classifier (threshold 0.5) operating point.
+        auto with_clf = [](double tq) {
+            MarginParams p = voronoi(2560.0, 0.0, 0.15, tq, true);
+            p.seed_model = g_seed_model, p.seed_threshold = 0.5;
+            return p;
+        };
+        c.push_back({with_clf(0.9)});  // current method
+        for (double tq : {0.95, 0.98, 1.0}) c.push_back({with_clf(tq)});
+        MarginParams ho = with_clf(0.9), both = with_clf(0.9);
+        ho.cusp_seed_quantile = kHeightOracle;
+        both.cusp_seed_quantile = kBothOracles;
+        c.push_back({ho});
+        c.push_back({both});
+        return c;
+    }
     c.push_back({voronoi(2560.0, 0.0, 0.15, 0.9, true)});  // the operating point
     if (g_seed_model) {
         for (double t : {0.5, 0.8, 0.85, 0.9, 0.95}) {
@@ -144,6 +185,8 @@ int main(int argc, char** argv) {
         }
     }
     g_seed_model = seed_model.weights.empty() ? nullptr : &seed_model;
+    if (argc > 6) g_experiment = argv[6];
+    const std::size_t max_remainder = argc > 7 ? std::stoul(argv[7]) : stride - 1;
     const auto objs = dataset::index_files({argv[2]}, ".obj");
     const auto labels = dataset::index_files({argv[2]}, ".json");
     const std::vector<Config> configs = mode == "sweep" ? sweep_configs() : mode == "validate" ? validate_configs() : test_configs();
@@ -154,7 +197,7 @@ int main(int argc, char** argv) {
     double input_ms = 0.0;
     for (const auto& [stem, obj] : objs) {
         const std::size_t rem = index++ % stride;
-        if (mode == "validate" ? rem < min_remainder : rem != 0) continue;
+        if (mode == "validate" ? (rem < min_remainder || rem > max_remainder) : rem != 0) continue;
         const auto lab = labels.find(stem);
         if (lab == labels.end()) continue;
         const JsonResult j = parse_json(dataset::read_text(lab->second));
@@ -183,7 +226,24 @@ int main(int argc, char** argv) {
                 val = it->second;
             }
             std::vector<std::uint8_t> tooth;
-            if (p.cusp_seed_quantile == kOracle) {  // oracle: drop seeds on true gingiva (diagnostic only)
+            std::vector<std::uint8_t> veto;
+            if (p.cusp_seed_quantile == kHeightOracle || p.cusp_seed_quantile == kBothOracles) {
+                // Oracles (diagnostics): veto tooth seeds on true gingiva. Height-only keeps cusp seeds
+                // as the classifier left them; "both" vetoes every gingival tooth seed.
+                MarginParams pp = p;
+                pp.cusp_seed_quantile = 0.0;
+                veto.assign(truth.size(), 0);
+                for (std::size_t v = 0; v < truth.size(); ++v) veto[v] = truth[v] == 0;
+                MarginInputs filtered = in;
+                if (p.cusp_seed_quantile == kHeightOracle) {
+                    // keep classifier-surviving cusp seeds even on gingiva: veto applies to height seeds only
+                    std::vector<std::uint8_t> cusp_mark(truth.size(), 0);
+                    for (std::uint32_t v : in.cusp_tips) cusp_mark[v] = 1;
+                    for (std::size_t v = 0; v < truth.size(); ++v) if (cusp_mark[v]) veto[v] = 0;
+                }
+                pp.tooth_seed_veto = &veto;
+                tooth = margin_labels(m, filtered, val, pp);
+            } else if (p.cusp_seed_quantile == kOracle) {  // oracle: drop seeds on true gingiva (diagnostic only)
                 MarginInputs filtered = in;
                 std::erase_if(filtered.cusp_tips, [&](std::uint32_t v) { return truth[v] == 0; });
                 MarginParams pp = p;
@@ -222,12 +282,10 @@ int main(int argc, char** argv) {
                             median(totals[i].assd), mean(totals[i].hd95), mean(totals[i].f1_025), mean(totals[i].f1_050), mean(totals[i].iou));
     }
     if (mode == "validate" || (mode == "test" && g_seed_model)) {
-        // Paired comparison against the operating point on the same scans: is a gain real?
-        const std::size_t base_index = mode == "validate" ? 0 : 2;
-        std::printf("\npaired vs operating point (per-scan ASSD difference; negative = better):\n");
-        const auto& base = totals[base_index].assd;
-        for (std::size_t c = base_index + 1; c < configs.size(); ++c) {
-            const auto& t = totals[c].assd;
+        // Paired comparison on the same scans: is a gain real? Validate pairs every row with row 0; test
+        // pairs every two rows (the disclosed runs compare old and new points with and without the classifier).
+        auto paired = [&](std::size_t a, std::size_t b) {
+            const auto &base = totals[a].assd, &t = totals[b].assd;
             double sum = 0.0, sq = 0.0;
             std::size_t wins = 0, losses = 0;
             for (std::size_t i = 0; i < base.size(); ++i) {
@@ -237,8 +295,14 @@ int main(int argc, char** argv) {
             }
             const double n = double(base.size()), mean_d = sum / n;
             const double se = std::sqrt(std::max(sq / n - mean_d * mean_d, 0.0) / (n - 1.0));
-            std::printf("  %-55s mean %+.4f mm, SE %.4f (t = %+.1f), better on %zu, worse on %zu of %zu scans\n",
-                        configs[c].label().c_str(), mean_d, se, se > 0 ? mean_d / se : 0.0, wins, losses, base.size());
+            std::printf("  [%zu] -> [%zu] %-50s mean %+.4f mm, SE %.4f (t = %+.1f), better on %zu, worse on %zu of %zu scans\n", a, b,
+                        configs[b].label().c_str(), mean_d, se, se > 0 ? mean_d / se : 0.0, wins, losses, base.size());
+        };
+        std::printf("\npaired per-scan ASSD difference (row index -> row index; negative = better):\n");
+        for (std::size_t a = 0; a < configs.size(); ++a) {
+            for (std::size_t b = a + 1; b < configs.size(); ++b) {
+                if (mode == "test" || a == 0) paired(a, b);
+            }
         }
     }
     if (mode == "test") {

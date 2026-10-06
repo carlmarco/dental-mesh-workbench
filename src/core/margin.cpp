@@ -64,6 +64,10 @@ const std::vector<std::string>& seed_feature_names() {
     return names;
 }
 
+std::vector<double> nearest_point_distances(std::span<const Vec3> query, std::span<const Vec3> target, double cell) {
+    return nearest_distances(query, target, cell);
+}
+
 std::vector<Edge> label_boundary_edges(const HalfEdgeMesh& m, std::span<const std::uint8_t> label) {
     std::vector<Edge> out;
     for (std::uint32_t h = 0; h < m.origin.size(); ++h) {
@@ -196,6 +200,10 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
         else if (in.height[v] >= high) label[v] = 1;
     }
     for (std::uint32_t v : in.cut_vertices) label[v] = 0;
+    auto vetoed = [&](std::uint32_t v) { return p.tooth_seed_veto && (*p.tooth_seed_veto)[v]; };
+    for (std::uint32_t v = 0; v < nv; ++v) {
+        if (label[v] == 1 && vetoed(v)) label[v] = 2;  // oracle: height seed on true gingiva removed
+    }
     if (p.cusp_seeds) {
         const double seed_gate = q(p.cusp_seed_quantile);
         for (std::size_t i = 0; i < in.cusp_tips.size(); ++i) {
@@ -206,6 +214,7 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
                     p.seed_threshold) {
                 continue;  // the classifier says this seed is probably on gingiva (D76)
             }
+            if (vetoed(v)) continue;
             label[v] = 1;
         }
     }
@@ -239,9 +248,11 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
 MarginParams margin_operating_point() {
     // Chosen on 60 training scans (D73): ASSD 0.647 mm. sigma = 0 means raw kappa_min (the cervical
     // crease is narrow; smoothing blurs it); alpha in its converged regime (cost ~ integrated concavity).
+    // tooth_quantile 1.0 (D77): height-band tooth seeds leaked tooth fronts across crease gaps onto flat
+    // gingiva; only the highest arch vertex remains a height seed, so the cusp tips seed the teeth.
     MarginParams p;
     p.method = MarginParams::Method::GeodesicVoronoi;
-    p.valley_weight = 2560.0, p.curvature_scale = 0.0, p.gingiva_quantile = 0.15, p.tooth_quantile = 0.9, p.cusp_seeds = true;
+    p.valley_weight = 2560.0, p.curvature_scale = 0.0, p.gingiva_quantile = 0.15, p.tooth_quantile = 1.0, p.cusp_seeds = true;
     return p;
 }
 

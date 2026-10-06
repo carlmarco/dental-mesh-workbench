@@ -1,7 +1,8 @@
 // Margin failure analysis (D74). Runs the margin operating point on each scan and records where and
 // how it fails. Use VALIDATION scans (training scans not used in the sweeps) to guide changes; the
 // held-out test set is only ever described, never used for tuning.
-//   margin_analyze <scan-dir> <out.csv> [stride] [offset]   (skips scans with index % stride == offset)
+//   margin_analyze <scan-dir> <out.csv> [stride] [min_remainder] [model.json]
+//   (keeps scans with index % stride >= min_remainder; optional seed classifier at threshold 0.5, D76)
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -14,6 +15,7 @@
 #include "core/cusps.h"
 #include "core/dec.h"
 #include "core/io.h"
+#include "core/learn.h"
 #include "core/margin.h"
 #include "core/topology.h"
 #include "dataset.h"
@@ -54,18 +56,27 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: margin_analyze <scan-dir> <out.csv> [stride] [offset]\n");
         return 2;
     }
-    const std::size_t stride = argc > 3 ? std::stoul(argv[3]) : 0, offset = argc > 4 ? std::stoul(argv[4]) : 0;
+    const std::size_t stride = argc > 3 ? std::stoul(argv[3]) : 0, min_rem = argc > 4 ? std::stoul(argv[4]) : 0;
+    LogisticModel seed_model;
+    if (argc > 5) {
+        std::string err;
+        seed_model = parse_logistic_model(dataset::read_text(argv[5]), err);
+        if (!err.empty()) return std::fprintf(stderr, "model: %s\n", err.c_str()), 2;
+    }
+    MarginParams params = margin_operating_point();
+    if (!seed_model.weights.empty()) params.seed_model = &seed_model, params.seed_threshold = 0.5;
     const auto objs = dataset::index_files({argv[1]}, ".obj");
     const auto labels = dataset::index_files({argv[1]}, ".json");
     std::ofstream csv(argv[2]);
     csv << "scan,vertices,teeth,assd,hd95,f1_050,iou,false_margin_mm,missed_margin_mm,over_seg,under_seg,"
-           "excluded_faces,components,cusp_seeds,worst_tooth,worst_tooth_mm,seeds_on_gingiva,mean_edge_mm,genus\n";
+           "excluded_faces,components,cusp_seeds,worst_tooth,worst_tooth_mm,seeds_on_gingiva,mean_edge_mm,genus,"
+           "false_far_frac,false_near_frac,height_seeds_on_gingiva\n";
 
     std::array<std::vector<double>, 4> cat_err;  // per-point missed-margin distances by tooth category
     std::size_t index = 0, n = 0;
     for (const auto& [stem, obj] : objs) {
         const std::size_t i = index++;
-        if (stride && i % stride == offset) continue;  // e.g. skip the sweep scans
+        if (stride && i % stride < min_rem) continue;
         const auto lab = labels.find(stem);
         if (lab == labels.end()) continue;
         const JsonResult j = parse_json(dataset::read_text(lab->second));
@@ -84,7 +95,7 @@ int main(int argc, char** argv) {
             truth[v] = fdi[v] != 0;
             if (fdi[v]) teeth[fdi[v]]++;
         }
-        const MarginResult pred = detect_margin(m, margin_operating_point());
+        const MarginResult pred = detect_margin(m, params);
         const auto gt_edges = label_boundary_edges(m, truth);
         const auto gt_pts = edge_midpoints(m, gt_edges), pr_pts = edge_midpoints(m, pred.margin);
         const BoundaryMetrics b = compare_boundaries(pr_pts, gt_pts);
@@ -118,6 +129,27 @@ int main(int argc, char** argv) {
         const std::size_t cusps = seeds.size();
         std::size_t on_gingiva = 0;
         for (std::uint32_t v : seeds) on_gingiva += truth[v] == 0;
+        // D77: split false-margin samples (> 1 mm from the true margin) by distance to the nearest true
+        // TOOTH vertex: > 2 mm = a spurious tooth region inside gingiva (e.g. distal loops), else an offset.
+        std::vector<Vec3> tooth_pts;
+        for (std::size_t v = 0; v < nv; ++v)
+            if (truth[v]) tooth_pts.push_back(m.positions[v]);
+        const auto to_tooth = nearest_point_distances(pr_pts, tooth_pts, 1.0);
+        std::size_t far = 0, near = 0;
+        for (std::size_t k = 0; k < pr_pts.size(); ++k) {
+            if (falsem[k] <= 1.0) continue;
+            (to_tooth[k] > 2.0 ? far : near)++;
+        }
+        // Height seeds (top tooth_quantile of arch height) that land on true gingiva.
+        const MarginInputs mi = margin_inputs(m, false);
+        const auto& hs = mi.sorted_arch_height;
+        const double high = hs.empty() ? 0.0 : hs[static_cast<std::size_t>(params.tooth_quantile * double(hs.size() - 1))];
+        std::size_t hseeds = 0, hseeds_gingiva = 0;
+        for (std::size_t v = 0; v < nv; ++v) {
+            if (!mi.arch[v] || mi.height[v] < high) continue;
+            ++hseeds;
+            hseeds_gingiva += truth[v] == 0;
+        }
         // H2: resolution (mean edge length).
         double edge_sum = 0.0;
         std::size_t edge_n = 0;
@@ -130,7 +162,9 @@ int main(int argc, char** argv) {
             << region_iou(pred.tooth, truth, area) << ',' << mean(falsem) << ',' << mean(missed) << ','
             << over / tooth_area << ',' << under / tooth_area << ',' << a.excluded_faces << ',' << comps << ','
             << cusps << ',' << worst << ',' << worst_mm << ',' << (cusps ? double(on_gingiva) / double(cusps) : 0.0) << ','
-            << edge_sum / double(std::max<std::size_t>(edge_n, 1)) << ',' << genus << '\n';
+            << edge_sum / double(std::max<std::size_t>(edge_n, 1)) << ',' << genus << ','
+            << double(far) / double(std::max<std::size_t>(pr_pts.size(), 1)) << ',' << double(near) / double(std::max<std::size_t>(pr_pts.size(), 1))
+            << ',' << (hseeds ? double(hseeds_gingiva) / double(hseeds) : 0.0) << '\n';
         ++n;
         std::fprintf(stderr, "\r%zu scans", n);
     }

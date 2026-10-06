@@ -579,3 +579,34 @@ Each entry: the choice, the alternatives considered, and the reason.
 - Licence handling: the model file (12 numbers + names) stays local in git-ignored data/models; the public build
   and viewer keep the classifier-free operating point until the author decides whether trained weights from
   CC BY-NC-ND data may be published.
+
+## D77. Far-from-teeth false margins: height seeds leak, dropped (tooth_quantile 1.0)
+- Decomposition (validation, 120 scans, classifier on, ASSD 0.560): false margin = predicted margin samples > 1 mm
+  from the true margin, split by distance to the nearest true tooth vertex: "far" (> 2 mm, a spurious tooth region
+  inside gingiva) is 8.3% of predicted samples on average, "near" (an offset line) 5.5%. Per scan, ASSD
+  correlates +0.88 with the far share (HD95 +0.69): the tail of D74 is mostly false margin on gingiva.
+- Sliver hypothesis rejected (LAFJJKAE_upper): correct margin edges have median min triangle angle 21.8 deg,
+  false far edges 20.8 deg; median kappa_min -4.53 vs -0.93. The false lines sit on flat gingiva, not on bad
+  triangles. Mechanism: first-arrival Voronoi; a tooth front that slips through a gap in the crease floods flat
+  gingiva before the gingiva front arrives, leaving parallel stripes.
+- Height seeds on true gingiva: median 0.1% but mean 2.3% of height seeds (a few scans, e.g. tilted or with high
+  palatal gingiva, put large tooth seed sets on gingiva). Height-seed oracle (those removed with labels): 0.498.
+- Experiment (validation, paired vs tq 0.9): tq 0.95 -0.031 mm (t -3.5, worse 33/120); 0.98 -0.047 (t -4.3, worse
+  28); 1.0 -0.071 (t -3.9, worse 27). Both oracles (cusp + height seeds on gingiva removed): -0.158 (t -7.0).
+- Confirmed on the 60 sweep scans (independent of the 120; same paired baseline 0.625): 0.98 -0.072 (t -3.4,
+  worse 7/60); 1.0 -0.106 (t -3.4, worse 11/60), median 0.391, IoU 0.880; tq 1.0 without classifier 0.558 (worse
+  23/60): the classifier still pays without height seeds.
+- **Chosen tq 1.0** by the D76 criterion: regressions are close (validation 27 vs 28, sweep 11 vs 7; 38 vs 35 of
+  180 combined), so the larger mean gain decides, and it is the simpler method (only the single highest arch
+  vertex remains a height seed; cusp tips seed the teeth).
+- Omission owned: the D73 sweep never tried tq above 0.9 (edge of the grid). The fix was available from the start.
+- The principled anti-leak fix is a min-cut labelling (regional + boundary terms), not first arrival; not done.
+- **Third test evaluation (disclosed, 2026-10-06; method fixed on validation + sweep scans before the run):** 300
+  scans. Public point (no classifier) tq 0.9 -> 1.0: ASSD 0.551 -> **0.520 mm** (median 0.450 -> 0.409), HD95 3.27
+  -> 2.95, IoU 0.841 -> 0.847; paired -0.032 mm, t = -3.6, better 178 / worse 122. With the classifier: 0.528 ->
+  **0.491 mm** (median 0.392), HD95 3.18 -> **2.85**, F1@0.5 0.824, IoU **0.882**; paired -0.037, t = -4.0, better
+  183 / worse 117. Classifier on top of tq 1.0: -0.029, t = -6.0, worse on only 11. Rows 0-1 reproduce D76 exactly.
+- Honest reading: the gain is real (t -3.6 / -4.0) and hits the tail it was aimed at (HD95 -0.3 mm), but it is
+  half the validation effect and the regression rate is higher (39-41% of test scans vs 18-23% on validation and
+  sweep scans). The height-seed change trades many small losses for fewer large wins; it is not a dominance result
+  like the classifier (5/300). Not re-tuned on test. Next: min-cut labelling, and per-scan regression sizes.
