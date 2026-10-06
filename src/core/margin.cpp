@@ -12,6 +12,7 @@
 #include "core/curvature.h"
 #include "core/dec.h"
 #include "core/cusps.h"
+#include "core/maxflow.h"
 #include "detail/hash.h"
 #include "detail/vec.h"
 
@@ -218,30 +219,99 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
             label[v] = 1;
         }
     }
-    // Two-label multi-source Dijkstra: each vertex takes the label of the front that arrives first.
-    std::vector<double> dist(nv, std::numeric_limits<double>::infinity());
-    using Item = std::pair<double, std::uint32_t>;
-    std::priority_queue<Item, std::vector<Item>, std::greater<>> heap;
-    for (std::uint32_t v = 0; v < nv; ++v) {
-        if (label[v] != 2) dist[v] = 0.0, heap.push({0.0, v});
-    }
     const bool weighted = p.valley_weight > 0.0 && !valley.empty();
-    while (!heap.empty()) {
-        const auto [d, v] = heap.top();
-        heap.pop();
-        if (d > dist[v]) continue;
-        for (std::uint32_t w : one_ring(m, v)) {
-            if (!in.arch[w]) continue;
-            double cost = norm(m.positions[w] - m.positions[v]);
-            if (weighted) cost *= 1.0 + p.valley_weight * 0.5 * (valley[v] + valley[w]);
-            if (d + cost < dist[w]) {
-                dist[w] = d + cost;
-                label[w] = label[v];
-                heap.push({dist[w], w});
+    auto edge_cost = [&](std::uint32_t v, std::uint32_t w) {
+        double cost = norm(m.positions[w] - m.positions[v]);
+        if (weighted) cost *= 1.0 + p.valley_weight * 0.5 * (valley[v] + valley[w]);
+        return cost;
+    };
+    // Multi-source Dijkstra over the arch from the vertices with label[v] in `sources`; `owner` records
+    // which seed label each vertex was reached from (first arrival).
+    auto arrival = [&](auto is_source, std::vector<double>& dist, std::vector<std::uint8_t>* owner) {
+        dist.assign(nv, std::numeric_limits<double>::infinity());
+        using Item = std::pair<double, std::uint32_t>;
+        std::priority_queue<Item, std::vector<Item>, std::greater<>> heap;
+        for (std::uint32_t v = 0; v < nv; ++v) {
+            if (is_source(label[v])) dist[v] = 0.0, heap.push({0.0, v});
+        }
+        while (!heap.empty()) {
+            const auto [d, v] = heap.top();
+            heap.pop();
+            if (d > dist[v]) continue;
+            for (std::uint32_t w : one_ring(m, v)) {
+                if (!in.arch[w]) continue;
+                const double nd = d + edge_cost(v, w);
+                if (nd < dist[w]) {
+                    dist[w] = nd;
+                    if (owner) (*owner)[w] = (*owner)[v];
+                    heap.push({nd, w});
+                }
             }
         }
+    };
+    if (p.method == MarginParams::Method::GeodesicVoronoi) {
+        // Two-label multi-source Dijkstra: each vertex takes the label of the front that arrives first.
+        std::vector<double> dist;
+        arrival([](std::uint8_t l) { return l != 2; }, dist, &label);
+        for (std::size_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && label[v] == 1) ? 1 : 0;
+        return tooth;
     }
-    for (std::size_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && label[v] == 1) ? 1 : 0;
+
+    // GraphCut (D78). Unary terms from the two arrival distances; nodes are the arch vertices.
+    std::vector<double> dt, dg;
+    arrival([](std::uint8_t l) { return l == 1; }, dt, nullptr);
+    arrival([](std::uint8_t l) { return l == 0; }, dg, nullptr);
+    std::vector<double> area(nv, 0.0), dual(m.origin.size(), 0.0);  // lumped areas; dual length per half-edge
+    for (std::uint32_t f = 0; f < m.origin.size() / 3; ++f) {
+        const std::array<std::uint32_t, 3> c{m.origin[3 * f], m.origin[3 * f + 1], m.origin[3 * f + 2]};
+        const double a = 0.5 * norm(cross(m.positions[c[1]] - m.positions[c[0]], m.positions[c[2]] - m.positions[c[0]]));
+        for (std::uint32_t k = 0; k < 3; ++k) {
+            area[c[k]] += a / 3.0;
+            // Half-edge 3f + k runs c[k] -> c[k+1]; its opposite corner is c[k+2]. Contribution to the
+            // dual edge length: cot(opposite angle) / 2 * |e| (the *1 entry of D45 times the length).
+            const Vec3 u = m.positions[c[k]] - m.positions[c[(k + 2) % 3]];
+            const Vec3 w = m.positions[c[(k + 1) % 3]] - m.positions[c[(k + 2) % 3]];
+            const double sin2 = norm(cross(u, w));
+            const double cot = sin2 > 0.0 ? dot(u, w) / sin2 : 0.0;
+            dual[3 * f + k] = 0.5 * cot * norm(m.positions[c[(k + 1) % 3]] - m.positions[c[k]]);
+        }
+    }
+    std::vector<std::uint32_t> node(nv, kInvalid);
+    std::uint32_t count = 0;
+    for (std::uint32_t v = 0; v < nv; ++v) {
+        if (in.arch[v]) node[v] = count++;
+    }
+    MaxFlow g(count);
+    constexpr double kHard = 1e12, kEps = 1e-6;
+    for (std::uint32_t v = 0; v < nv; ++v) {
+        if (!in.arch[v]) continue;
+        if (label[v] == 1) {
+            g.add_terminal(node[v], kHard, 0.0);
+        } else if (label[v] == 0) {
+            g.add_terminal(node[v], 0.0, kHard);
+        } else {
+            // Tooth likelihood p = d_G / (d_T + d_G): 1 at tooth seeds, 1/2 where the fronts meet.
+            const double t = dt[v], s = dg[v];
+            const double pt = !std::isfinite(t) ? 0.0 : !std::isfinite(s) ? 1.0 : s / (s + t);
+            // Source side = tooth pays the sink capacity: D(tooth) = -A log p; D(gingiva) = -A log(1 - p).
+            g.add_terminal(node[v], -area[v] * std::log(std::max(1.0 - pt, kEps)), -area[v] * std::log(std::max(pt, kEps)));
+        }
+    }
+    if (p.cut_smoothness > 0.0) {
+        for (std::uint32_t h = 0; h < m.origin.size(); ++h) {
+            const std::uint32_t t = m.twin[h];
+            if (t == kInvalid || t < h) continue;  // interior edges once; boundary edges cut nothing
+            const std::uint32_t a = m.origin[h], b = dest(m, h);
+            if (!in.arch[a] || !in.arch[b]) continue;
+            // Obtuse pairs can make the cotan dual length negative; clamp (a cut cost must be >= 0).
+            const double len = std::max(0.0, dual[h] + dual[t]);
+            const double crease = valley.empty() ? 0.0 : 0.5 * (valley[a] + valley[b]);
+            const double w = p.cut_smoothness * len / (1.0 + p.cut_crease * crease);
+            if (w > 0.0) g.add_edge(node[a], node[b], w, w);
+        }
+    }
+    g.solve();
+    for (std::uint32_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && g.source_side(node[v])) ? 1 : 0;
     return tooth;
 }
 
@@ -250,14 +320,17 @@ MarginParams margin_operating_point() {
     // crease is narrow; smoothing blurs it); alpha in its converged regime (cost ~ integrated concavity).
     // tooth_quantile 1.0 (D77): height-band tooth seeds leaked tooth fronts across crease gaps onto flat
     // gingiva; only the highest arch vertex remains a height seed, so the cusp tips seed the teeth.
+    // GraphCut (D78): mu 1000, beta 300, the centre of the plateau of the third sweep on the 60 sweep
+    // scans (ASSD 0.323 vs 0.558 for Voronoi); validation 0.518 -> 0.344 mm.
     MarginParams p;
-    p.method = MarginParams::Method::GeodesicVoronoi;
+    p.method = MarginParams::Method::GraphCut;
     p.valley_weight = 2560.0, p.curvature_scale = 0.0, p.gingiva_quantile = 0.15, p.tooth_quantile = 1.0, p.cusp_seeds = true;
+    p.cut_smoothness = 1000.0, p.cut_crease = 300.0;
     return p;
 }
 
 MarginResult detect_margin(const HalfEdgeMesh& m, const MarginParams& p) {
-    const bool voronoi = p.method == MarginParams::Method::GeodesicVoronoi;
+    const bool voronoi = p.method != MarginParams::Method::HeightPlane;  // Voronoi or GraphCut: same seeds
     const MarginInputs in = margin_inputs(m, voronoi && p.cusp_seeds);
     std::vector<double> valley;
     if (voronoi && p.valley_weight > 0.0) valley = valley_strength(build_dec(m), in.kmin, p.curvature_scale);

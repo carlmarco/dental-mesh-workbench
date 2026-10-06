@@ -119,3 +119,69 @@ TEST_CASE("margin: seed classifier hook - reject-all equals no cusp seeds, accep
     accept.seed_model = &always;
     CHECK(margin_labels(mesh, in, {}, accept) == margin_labels(mesh, in, {}, base));
 }
+
+TEST_CASE("margin: graph cut with zero smoothness equals the Voronoi labelling (unary = arrival order)", "[margin]") {
+    const auto mesh = he(crown_patch());
+    MarginParams voronoi;
+    voronoi.cusp_seeds = false;
+    MarginParams cut = voronoi;
+    cut.method = MarginParams::Method::GraphCut;
+    cut.cut_smoothness = 0.0;  // no boundary term: each vertex takes its cheaper unary, i.e. d_T < d_G
+    const MarginInputs in = margin_inputs(mesh, false);
+    const auto valley = valley_strength(build_dec(mesh), in.kmin, voronoi.curvature_scale);
+    const auto a = margin_labels(mesh, in, valley, voronoi), b = margin_labels(mesh, in, valley, cut);
+    std::size_t differ = 0;
+    for (std::size_t v = 0; v < a.size(); ++v) differ += a[v] != b[v];
+    CHECK(differ <= a.size() / 1000);  // only exact distance ties may break differently
+}
+
+TEST_CASE("margin: graph cut snaps to the crease like Voronoi", "[margin]") {
+    const auto mesh = he(crown_patch());
+    const auto truth = truth_labels(mesh);
+    const auto gt_line = edge_midpoints(mesh, label_boundary_edges(mesh, truth));
+    MarginParams cut;
+    cut.method = MarginParams::Method::GraphCut;
+    cut.cusp_seeds = false;
+    const auto r = detect_margin(mesh, cut);
+    CHECK(compare_boundaries(edge_midpoints(mesh, r.margin), gt_line).assd < 0.15);
+    CHECK(region_iou(r.tooth, truth, build_dec(mesh).star0) > 0.95);
+}
+
+TEST_CASE("margin: a false tooth seed on flat gingiva floods a Voronoi region; the graph cut confines it", "[margin]") {
+    // The D74/D77 failure: one tooth seed on gingiva. First arrival gives it every vertex it reaches
+    // first (a fake tooth region); the cut pays mu per mm of boundary on flat gingiva, so the region
+    // shrinks as mu grows (measured: 6.94 mm^2 Voronoi; 5.12, 1.70, 0.73, 0.056 at mu 0.3, 1, 3, 10).
+    const auto mesh = he(crown_patch());
+    const auto truth = truth_labels(mesh);
+    const auto area = build_dec(mesh).star0;
+    MarginInputs in = margin_inputs(mesh, false);
+    std::uint32_t fake = 0;  // flat gingiva at (4.5, 0), between the crown and the patch edge
+    for (std::uint32_t v = 0; v < mesh.positions.size(); ++v) {
+        const Vec3& p = mesh.positions[v];
+        if (std::hypot(p.x - 4.5, p.y) < std::hypot(mesh.positions[fake].x - 4.5, mesh.positions[fake].y)) fake = v;
+    }
+    in.cusp_tips = {fake};
+    MarginParams voronoi;  // cusp seeds on (the injected one), no classifier
+    // Gingiva seeds = the scan cut (patch border) only, as on a real arch: on this flat patch the 15%
+    // height quantile would make every gingiva vertex a seed and leave nothing to flood.
+    voronoi.gingiva_quantile = 0.0;
+    MarginParams cut = voronoi;
+    cut.method = MarginParams::Method::GraphCut;
+    const auto valley = valley_strength(build_dec(mesh), in.kmin, voronoi.curvature_scale);
+    auto false_tooth_area = [&](const std::vector<std::uint8_t>& lab) {
+        double a = 0.0;
+        for (std::size_t v = 0; v < lab.size(); ++v) a += (lab[v] && !truth[v]) ? area[v] : 0.0;
+        return a;
+    };
+    const double av = false_tooth_area(margin_labels(mesh, in, valley, voronoi));
+    std::vector<double> ac;
+    for (double mu : {0.3, 1.0, 3.0, 10.0}) {
+        cut.cut_smoothness = mu;
+        ac.push_back(false_tooth_area(margin_labels(mesh, in, valley, cut)));
+    }
+    INFO("false tooth area: Voronoi " << av << " mm^2; cut " << ac[0] << ", " << ac[1] << ", " << ac[2] << ", " << ac[3]);
+    CHECK(av > 0.5);  // mm^2: Voronoi grows a real fake region
+    CHECK(ac[0] < av);
+    CHECK(std::is_sorted(ac.rbegin(), ac.rend()));  // monotone in mu
+    CHECK(ac[3] < 0.05 * av);                       // a speck around the hard seed
+}

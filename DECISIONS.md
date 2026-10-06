@@ -610,3 +610,40 @@ Each entry: the choice, the alternatives considered, and the reason.
   half the validation effect and the regression rate is higher (39-41% of test scans vs 18-23% on validation and
   sweep scans). The height-seed change trades many small losses for fewer large wins; it is not a dominance result
   like the classifier (5/300). Not re-tuned on test. Next: min-cut labelling, and per-scan regression sizes.
+
+## D78. Graph-cut margin labelling (Boykov-Kolmogorov max-flow), and the fourth test evaluation
+- Why: D77 traced the tail to first arrival: one gap in the crease lets a tooth front flood flat gingiva. A cut
+  that pays for its boundary cannot do that cheaply. Energy over arch vertices (seeds as hard constraints):
+  E = sum_v A_v D_v + mu * sum_cut l*_e / (1 + beta s_e); D from the two arrival distances, p = d_G / (d_T + d_G),
+  D = -log p (tooth) or -log(1 - p) (gingiva); l*_e = cotan dual edge length (clamped at 0 on obtuse pairs);
+  s = valley strength as in D71. After the geodesic graph cut of Price, Morse & Cohen (CVPR 2010), with seeds
+  as hard constraints (Boykov & Jolly, ICCV 2001), moved from pixels to a mesh.
+- Solver: Boykov & Kolmogorov (PAMI 2004), written from scratch (core/maxflow). Tests: CLRS Fig. 26.1 (23),
+  brute-force min cut on 300 random graphs, Edmonds-Karp on 600 sparse random graphs, max-flow = cut value of
+  the returned labels. Mutants: 5 tried; missing neighbour re-activation on freeing survived the small dense
+  graphs and is killed by the sparse Edmonds-Karp test; the distance heuristic and one redundant re-activation
+  are equivalent (speed only / already covered by the scan cursor; the redundant line was removed).
+- Synthetic test: one false tooth seed on flat gingiva: Voronoi fake region 6.94 mm^2; cut 5.12, 1.70, 0.73,
+  0.056 at mu 0.3, 1, 3, 10. mu = 0 reproduces Voronoi (the unary alone is the arrival order).
+- Bug caught by the sweep: margin_eval computed valley strength only for Voronoi, so the first graph-cut sweep ran
+  without the crease term (all beta identical, ASSD ~1.73). Fixed; the test-mode library path check would have
+  caught it, validate mode has none.
+- Tuning (60 sweep scans, paired vs Voronoi 0.558): sweep 1 mu {0.3..10} x beta {0, 100, 1000}: beta 0 worse at
+  every mu (crease term essential); best at the mu edge. Sweep 2 mu {10..300}: 0.315 at (300, 100), edge again.
+  Sweep 3 mu {300..1e6} x beta {30, 100, 300}: interior plateau along mu / beta ~ 3-10: (300,100) 0.315,
+  (1000,100) 0.323, (1000,300) 0.323, (3000,300) 0.313, all within noise; mu 1e6 (unary negligible) 0.367, so the
+  distance term helps. **Chosen (1000, 300), the plateau centre** (most stable neighbours); post-hoc criterion,
+  stated as such.
+- Validation (120 scans): Voronoi 0.518 -> cut **0.344 mm** (median 0.274), HD95 3.25 -> 2.38, IoU 0.872 -> 0.933;
+  paired -0.174, t = -7.9, worse on 28 (2 by > 0.1 mm, largest +0.166). Classifier on top: 0.337.
+- **Fourth test evaluation (disclosed, 2026-10-06; settings fixed before the run):** 300 scans. Voronoi 0.520 ->
+  **GraphCut 0.338 mm** (median 0.409 -> 0.283), HD95 2.95 -> **2.34**, F1@0.25 0.764 -> 0.832, F1@0.5 0.819 ->
+  **0.883**, IoU 0.847 -> **0.925**; paired -0.182 mm, t = -11.5, better on 247 / worse on 53, only 7 worse by
+  > 0.1 mm (largest +0.191). Validation predicted it (-0.174 vs -0.182). With the classifier: 0.334 (adds -0.004,
+  t -3.0): the cut makes the classifier nearly redundant, so the public build loses almost nothing without it.
+  Rows 0 and 2 reproduce D77 exactly; library path agrees. Since the first test run: 0.551 -> 0.338 mm (-39%).
+- Cost: labelling 36 -> 137 ms per scan native (two Dijkstras + max-flow on ~100k nodes), on top of ~1 s of
+  shared inputs (curvature, cusps). Browser time not re-measured yet.
+- Four test evaluations of the margin have now been run, each disclosed; the test set is no longer pristine
+  in the strict sense (method choices were made after seeing earlier test numbers). Next margin claim should
+  come from a fresh split or be flagged.

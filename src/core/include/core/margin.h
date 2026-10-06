@@ -19,15 +19,23 @@ namespace dmw {
 //                    of the front that reaches it first. Edge cost l * (1 + valley_weight * s), where
 //                    s = max(0, -kappa_min) of the smoothed minimum principal curvature (valley strength):
 //                    fronts stall in concave creases, so they meet in the cervical crease.
+//   GraphCut         same seeds and edge costs; minimum s-t cut (D78) of the energy
+//                      E = sum_v A_v D_v(label) + mu * sum_{cut edges} l*_e / (1 + beta * s_e)
+//                    with D from the two arrival distances (p_v = d_G / (d_T + d_G) is the tooth
+//                    likelihood, D = -log p or -log(1 - p)), l*_e the cotan dual edge length, and seeds
+//                    as hard constraints. A fake tooth region on flat gingiva pays mu per mm of its
+//                    boundary, so it survives only if its unary evidence outweighs its perimeter.
 // Only the largest component (the arch) is labelled; everything else is gingiva.
 struct MarginParams {
-    enum class Method { HeightPlane, GeodesicVoronoi };
+    enum class Method { HeightPlane, GeodesicVoronoi, GraphCut };
     Method method = Method::GeodesicVoronoi;
     double plane_quantile = 0.5;     // HeightPlane: tooth above this height quantile
     double valley_weight = 10.0;     // alpha (mm); 0 = plain geodesic Voronoi
     double curvature_scale = 0.3;    // sigma (mm) for smoothing kappa_min
     double gingiva_quantile = 0.15;  // gingiva seeds: arch vertices below this height quantile
     double tooth_quantile = 0.9;     // tooth seeds: arch vertices above this height quantile
+    double cut_smoothness = 1.0;     // GraphCut: mu (mm), boundary cost per mm of cut on flat surface
+    double cut_crease = 100.0;       // GraphCut: beta (mm), how much cheaper a cut is along a crease
     bool cusp_seeds = true;          // also seed teeth at detected cusp tips (detect_cusps, D68 point)
     double cusp_seed_quantile = 0.0; // keep only cusp seeds above this arch-height quantile (D75; 0 = all)
     // Seed classifier (D76): drop cusp seeds with P(tooth) < seed_threshold. Non-owning; null = off.

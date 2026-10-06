@@ -33,6 +33,9 @@ struct Config {
     std::string label() const {
         char b[160];
         if (p.method == Method::HeightPlane) std::snprintf(b, sizeof b, "plane cut q=%.2f", p.plane_quantile);
+        else if (p.method == Method::GraphCut)
+            std::snprintf(b, sizeof b, "GraphCut mu=%.2f beta=%.0f alpha=%.0f tq=%.2f%s", p.cut_smoothness, p.cut_crease,
+                          p.valley_weight, p.tooth_quantile, p.seed_model ? " + classifier" : "");
         else if (p.cusp_seed_quantile == kHeightOracle) std::snprintf(b, sizeof b, "ORACLE: height seeds on true gingiva removed (+clf)");
         else if (p.cusp_seed_quantile == kBothOracles) std::snprintf(b, sizeof b, "ORACLE: all tooth seeds on true gingiva removed");
         else if (p.cusp_seed_quantile < 0.0) std::snprintf(b, sizeof b, "ORACLE: cusp seeds on true gingiva removed");
@@ -75,20 +78,21 @@ const LogisticModel* g_seed_model = nullptr;  // set from the command line (D76)
 //   chosen: alpha 2560, sigma 0 (raw kappa_min; the natural end of the range), gq 0.15, tq 0.9, cusp
 //   seeds (ASSD 0.647, median 0.461, F1@0.5 0.799, IoU 0.820; alpha gains converging: 1280 -> 2560 = -0.004).
 // Test evaluations (disclosed): #1 (D73) plane / alpha-0 / chosen Voronoi; #2 (D76) + seed classifier 0.5;
-// #3 (D77, 2026-10-06) no height seeds (tooth_quantile 1.0), confirmed on 120 validation and 60 independent
-// sweep scans before this run. Row 0 is the paired baseline.
+// #3 (D77) no height seeds (tooth_quantile 1.0); #4 (D78, 2026-10-06) graph-cut labelling, mu 1000, beta 300,
+// tuned on the 60 sweep scans (3 sweeps) and validated on 120 scans before this run. Row 0 is the baseline.
+MarginParams graph_cut(bool clf) {
+    MarginParams p = voronoi(2560.0, 0.0, 0.15, 1.0, true);
+    p.method = Method::GraphCut, p.cut_smoothness = 1000.0, p.cut_crease = 300.0;
+    if (clf) p.seed_model = g_seed_model, p.seed_threshold = 0.5;
+    return p;
+}
 std::vector<Config> test_configs() {
-    std::vector<Config> c{{voronoi(2560.0, 0.0, 0.15, 0.9, true)}};      // public operating point before D77
+    std::vector<Config> c{{voronoi(2560.0, 0.0, 0.15, 1.0, true)}, {graph_cut(false)}};  // public point before / after D78
     if (g_seed_model) {
-        MarginParams old_clf = voronoi(2560.0, 0.0, 0.15, 0.9, true);
-        old_clf.seed_model = g_seed_model, old_clf.seed_threshold = 0.5;
-        c.push_back({old_clf});
-    }
-    c.push_back({voronoi(2560.0, 0.0, 0.15, 1.0, true)});               // new public operating point
-    if (g_seed_model) {
-        MarginParams new_clf = voronoi(2560.0, 0.0, 0.15, 1.0, true);
-        new_clf.seed_model = g_seed_model, new_clf.seed_threshold = 0.5;
-        c.push_back({new_clf});
+        MarginParams vclf = voronoi(2560.0, 0.0, 0.15, 1.0, true);
+        vclf.seed_model = g_seed_model, vclf.seed_threshold = 0.5;
+        c.push_back({vclf});
+        c.push_back({graph_cut(true)});
     }
     return c;
 }
@@ -98,6 +102,38 @@ std::vector<Config> test_configs() {
 std::string g_experiment = "thresholds";      // validate mode: which experiment (argv[6])
 std::vector<Config> validate_configs() {
     std::vector<Config> c;
+    if (g_experiment == "graphcut") {
+        // D78: tune the graph cut on TRAINING scans (the 60 sweep scans), paired vs the public point.
+        // Sweep 1: mu {0.3, 1, 3, 10} x beta {0, 100, 1000}: best mu 10 (grid edge), beta 100 (interior);
+        // beta 0 is far worse at every mu. Sweep 2: mu {10..300} x beta {30, 100, 300}: best mu 300 (edge),
+        // beta 100: ASSD 0.315. Sweep 3 (this): mu up to 1e6, where the unary term is negligible (pure
+        // crease-weighted minimum cut between the seeds).
+        c.push_back({voronoi(2560.0, 0.0, 0.15, 1.0, true)});
+        for (double mu : {300.0, 1000.0, 3000.0, 10000.0, 1e6})
+            for (double beta : {30.0, 100.0, 300.0}) {
+                MarginParams p = voronoi(2560.0, 0.0, 0.15, 1.0, true);
+                p.method = Method::GraphCut, p.cut_smoothness = mu, p.cut_crease = beta;
+                c.push_back({p});
+            }
+        return c;
+    }
+    if (g_experiment == "graphcut_validate") {
+        // D78: the chosen cut (mu 1000, beta 300; centre of the sweep-3 plateau) vs Voronoi, with and
+        // without the seed classifier, on validation scans.
+        auto cut = [](bool clf) {
+            MarginParams p = voronoi(2560.0, 0.0, 0.15, 1.0, true);
+            p.method = Method::GraphCut, p.cut_smoothness = 1000.0, p.cut_crease = 300.0;
+            if (clf) p.seed_model = g_seed_model, p.seed_threshold = 0.5;
+            return p;
+        };
+        MarginParams vclf = voronoi(2560.0, 0.0, 0.15, 1.0, true);
+        vclf.seed_model = g_seed_model, vclf.seed_threshold = 0.5;
+        c.push_back({voronoi(2560.0, 0.0, 0.15, 1.0, true)});
+        c.push_back({cut(false)});
+        c.push_back({vclf});
+        c.push_back({cut(true)});
+        return c;
+    }
     if (g_experiment == "confirm") {
         // D77: confirm the height-seed effect on independent scans (the 60 sweep scans).
         MarginParams base = voronoi(2560.0, 0.0, 0.15, 0.9, true);
@@ -150,6 +186,7 @@ std::vector<Config> validate_configs() {
 
 struct Totals {
     std::vector<double> assd, hd95, f1_025, f1_050, iou;
+    double label_ms = 0.0;  // labelling step only (inputs are shared across configurations)
     void add(const BoundaryMetrics& b, double i) {
         assd.push_back(b.assd), hd95.push_back(b.hd95), f1_025.push_back(b.f1_025), f1_050.push_back(b.f1_050), iou.push_back(i);
     }
@@ -220,7 +257,7 @@ int main(int argc, char** argv) {
         for (std::size_t c = 0; c < configs.size(); ++c) {
             const MarginParams& p = configs[c].p;
             std::span<const double> val;
-            if (p.method == Method::GeodesicVoronoi && p.valley_weight > 0.0) {
+            if (p.method != Method::HeightPlane && p.valley_weight > 0.0) {  // Voronoi and GraphCut
                 auto it = valley.find(p.curvature_scale);
                 if (it == valley.end()) it = valley.emplace(p.curvature_scale, valley_strength(ops, in.kmin, p.curvature_scale)).first;
                 val = it->second;
@@ -250,7 +287,9 @@ int main(int argc, char** argv) {
                 pp.cusp_seed_quantile = 0.0;
                 tooth = margin_labels(m, filtered, val, pp);
             } else {
+                const auto tl = std::chrono::steady_clock::now();
                 tooth = margin_labels(m, in, val, p);
+                totals[c].label_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tl).count();
             }
             totals[c].add(compare_boundaries(edge_midpoints(m, label_boundary_edges(m, tooth)), gt_line),
                           region_iou(tooth, truth, ops.star0));
@@ -281,22 +320,28 @@ int main(int argc, char** argv) {
                 std::printf("| (ablation) %s | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f |\n", configs[i].label().c_str(), mean(totals[i].assd),
                             median(totals[i].assd), mean(totals[i].hd95), mean(totals[i].f1_025), mean(totals[i].f1_050), mean(totals[i].iou));
     }
+    std::printf("\nlabelling time per scan (ms, after shared inputs; native Release):");
+    for (const auto& t : totals) std::printf(" %.0f", t.label_ms / double(std::max<std::size_t>(used, 1)));
+    std::printf("\n");
     if (mode == "validate" || (mode == "test" && g_seed_model)) {
         // Paired comparison on the same scans: is a gain real? Validate pairs every row with row 0; test
         // pairs every two rows (the disclosed runs compare old and new points with and without the classifier).
         auto paired = [&](std::size_t a, std::size_t b) {
             const auto &base = totals[a].assd, &t = totals[b].assd;
             double sum = 0.0, sq = 0.0;
-            std::size_t wins = 0, losses = 0;
+            std::size_t wins = 0, losses = 0, big_losses = 0;
+            double worst = 0.0;
             for (std::size_t i = 0; i < base.size(); ++i) {
                 const double d = t[i] - base[i];
                 sum += d, sq += d * d;
-                wins += d < -1e-9, losses += d > 1e-9;
+                wins += d < -1e-9, losses += d > 1e-9, big_losses += d > 0.1;
+                worst = std::max(worst, d);
             }
             const double n = double(base.size()), mean_d = sum / n;
             const double se = std::sqrt(std::max(sq / n - mean_d * mean_d, 0.0) / (n - 1.0));
-            std::printf("  [%zu] -> [%zu] %-50s mean %+.4f mm, SE %.4f (t = %+.1f), better on %zu, worse on %zu of %zu scans\n", a, b,
-                        configs[b].label().c_str(), mean_d, se, se > 0 ? mean_d / se : 0.0, wins, losses, base.size());
+            std::printf("  [%zu] -> [%zu] %-50s mean %+.4f mm, SE %.4f (t = %+.1f), better on %zu, worse on %zu of %zu scans"
+                        " (worse by > 0.1 mm: %zu; largest loss %+.3f mm)\n", a, b, configs[b].label().c_str(), mean_d, se,
+                        se > 0 ? mean_d / se : 0.0, wins, losses, base.size(), big_losses, worst);
         };
         std::printf("\npaired per-scan ASSD difference (row index -> row index; negative = better):\n");
         for (std::size_t a = 0; a < configs.size(); ++a) {

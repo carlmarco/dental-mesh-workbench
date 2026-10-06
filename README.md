@@ -117,10 +117,10 @@ Scans are not redistributed. Only aggregate metrics are reported, with attributi
 | Tooth-gingiva margin, concavity-weighted Voronoi (held-out Teeth3DS test split: 300 scans) | ASSD **0.551 mm** (median 0.450), HD95 3.27 mm, boundary F1 **0.815** at 0.5 mm, tooth IoU 0.841 |
 | Naive baseline: plane cut at a height quantile | ASSD 1.663 mm, boundary F1 0.208 at 0.5 mm |
 | + learned cusp-seed filter (logistic regression; model kept local, see D76) | ASSD **0.528 mm**, tooth IoU 0.869; paired: better on 130 scans, worse on 5 of 300 |
-| + no height-band tooth seeds (D77; public operating point) | ASSD **0.520 mm** (median 0.409), HD95 2.95 mm; paired vs 0.551: t = −3.6, better on 178, worse on 122 of 300 |
-| + both (classifier kept local) | ASSD **0.491 mm** (median 0.392), HD95 2.85 mm, boundary F1 0.824 at 0.5 mm, tooth IoU **0.882** |
+| + no height-band tooth seeds (D77) | ASSD 0.520 mm (median 0.409), HD95 2.95 mm; paired vs 0.551: t = −3.6, better on 178, worse on 122 of 300 |
+| **+ graph-cut labelling (Boykov–Kolmogorov max-flow, D78; public operating point)** | ASSD **0.338 mm** (median 0.283), HD95 **2.34 mm**, boundary F1 **0.883** at 0.5 mm, tooth IoU **0.925**; paired vs 0.520: t = −11.5, better on 247, worse on 53 (7 by > 0.1 mm) |
 | Cusp detection time, 93.6k-vertex scan | 383 ms native, 459 ms in the browser (WASM), after a 4-8× optimization (D70) |
-| Margin detection time, 113.7k-vertex scan | 733 ms in the browser (WASM), including cusp seeding |
+| Margin detection time, 113.7k-vertex scan | 733 ms in the browser (WASM) with Voronoi labelling, including cusp seeding; the graph cut adds ~100 ms per scan natively (36 → 137 ms labelling, 300-scan mean); browser not yet re-measured |
 
 ## Performance
 
@@ -168,9 +168,11 @@ breakdown comes from `dmw_bench`.
   (D10). Topology diagnostics still work on any mesh.
 - **Handle loops are valid generators, not the shortest in their homology class.** Their lengths are upper bounds
   on handle size (measured 3.5× the tight cycle on a synthetic handle, D64).
-- **The margin has a long tail:** HD95 is 2.95 mm on average. The tail is mostly false tooth regions spreading
-  over flat gingiva through gaps in the cervical crease (first-arrival Voronoi, D74/D77). Dropping height seeds
-  helps on average but makes 41% of test scans slightly worse; a min-cut labelling is the principled fix.
+- **The margin still has a tail:** HD95 is 2.34 mm on average. The graph cut (D78) removed most false tooth regions
+  that first-arrival Voronoi let flood the gingiva, but the margin has now been evaluated on the test split four
+  times (each disclosed), so the next claim should come from fresh data.
+- **"Margin" here is the tooth-gingiva boundary on unprepared arches,** not the finish line of a crown
+  preparation that restoration design needs; related problems, not the same one.
 - **Cusp detection over-detects on anterior teeth:** incisal edges score as tips but carry no cusp
   landmarks. It's the main precision loss, and tooth-type awareness is the next lever (D68).
 - **Boundary conditions:** the heat method uses Neumann conditions only (D48).
