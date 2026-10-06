@@ -1,6 +1,8 @@
 // Tooth-gingiva margin evaluation against Teeth3DS per-vertex labels (D71, D72, D73).
 //   margin_eval sweep <scan-dir> [stride]   parameter sweep on TRAINING scans (every stride-th scan)
 //   margin_eval test  <scan-dir>            fixed operating points on TEST scans (run once)
+//   margin_eval validate <scan-dir> <stride> VALIDATION: training scans NOT in the sweep (index % stride
+//                                            != 0), for failure-analysis experiments (D74, D75)
 // Each <name>.obj needs its <name>.json (labels: FDI per vertex, 0 = gingiva). Per-scan inputs are
 // computed once and reused across configurations; test mode re-checks the library path (detect_margin).
 #include <algorithm>
@@ -26,8 +28,9 @@ struct Config {
     std::string label() const {
         char b[160];
         if (p.method == Method::HeightPlane) std::snprintf(b, sizeof b, "plane cut q=%.2f", p.plane_quantile);
-        else std::snprintf(b, sizeof b, "Voronoi alpha=%.0f sigma=%.2f gq=%.2f tq=%.2f cusps=%d", p.valley_weight,
-                           p.curvature_scale, p.gingiva_quantile, p.tooth_quantile, int(p.cusp_seeds));
+        else if (p.cusp_seed_quantile < 0.0) std::snprintf(b, sizeof b, "ORACLE: cusp seeds on true gingiva removed");
+        else std::snprintf(b, sizeof b, "Voronoi alpha=%.0f sigma=%.2f gq=%.2f tq=%.2f cusps=%d seed_q=%.1f", p.valley_weight,
+                           p.curvature_scale, p.gingiva_quantile, p.tooth_quantile, int(p.cusp_seeds), p.cusp_seed_quantile);
         return b;
     }
 };
@@ -65,6 +68,22 @@ std::vector<Config> test_configs() {
     return {{plane(0.5)}, {voronoi(0.0, 0.0, 0.15, 0.9, true)}, {voronoi(2560.0, 0.0, 0.15, 0.9, true)}};
 }
 
+// Validation experiments (D75): seed filtering by a stricter height gate, plus an ORACLE that drops cusp
+// seeds lying on true gingiva (uses labels: an upper bound on what seed filtering can gain, not a method).
+constexpr double kOracle = -1.0;
+std::vector<Config> validate_configs() {
+    std::vector<Config> c;
+    for (double sq : {0.0, 0.6, 0.7, 0.8, 0.9}) {
+        MarginParams p = voronoi(2560.0, 0.0, 0.15, 0.9, true);
+        p.cusp_seed_quantile = sq;
+        c.push_back({p});
+    }
+    MarginParams oracle = voronoi(2560.0, 0.0, 0.15, 0.9, true);
+    oracle.cusp_seed_quantile = kOracle;
+    c.push_back({oracle});
+    return c;
+}
+
 struct Totals {
     std::vector<double> assd, hd95, f1_025, f1_050, iou;
     void add(const BoundaryMetrics& b, double i) {
@@ -93,13 +112,14 @@ int main(int argc, char** argv) {
     const std::size_t stride = argc > 3 ? std::stoul(argv[3]) : 1;
     const auto objs = dataset::index_files({argv[2]}, ".obj");
     const auto labels = dataset::index_files({argv[2]}, ".json");
-    const std::vector<Config> configs = mode == "sweep" ? sweep_configs() : test_configs();
+    const std::vector<Config> configs = mode == "sweep" ? sweep_configs() : mode == "validate" ? validate_configs() : test_configs();
     std::vector<Totals> totals(configs.size()), library(configs.size());
 
     std::size_t index = 0, used = 0, skipped = 0;
     double input_ms = 0.0;
     for (const auto& [stem, obj] : objs) {
-        if (index++ % stride != 0) continue;
+        const bool in_sweep = index++ % stride == 0;
+        if (mode == "validate" ? in_sweep : !in_sweep) continue;
         const auto lab = labels.find(stem);
         if (lab == labels.end()) continue;
         const JsonResult j = parse_json(dataset::read_text(lab->second));
@@ -127,7 +147,16 @@ int main(int argc, char** argv) {
                 if (it == valley.end()) it = valley.emplace(p.curvature_scale, valley_strength(ops, in.kmin, p.curvature_scale)).first;
                 val = it->second;
             }
-            const auto tooth = margin_labels(m, in, val, p);
+            std::vector<std::uint8_t> tooth;
+            if (p.cusp_seed_quantile == kOracle) {  // oracle: drop seeds on true gingiva (diagnostic only)
+                MarginInputs filtered = in;
+                std::erase_if(filtered.cusp_tips, [&](std::uint32_t v) { return truth[v] == 0; });
+                MarginParams pp = p;
+                pp.cusp_seed_quantile = 0.0;
+                tooth = margin_labels(m, filtered, val, pp);
+            } else {
+                tooth = margin_labels(m, in, val, p);
+            }
             totals[c].add(compare_boundaries(edge_midpoints(m, label_boundary_edges(m, tooth)), gt_line),
                           region_iou(tooth, truth, ops.star0));
             if (mode == "test") {  // the library path, end to end

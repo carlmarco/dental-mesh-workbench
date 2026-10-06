@@ -538,3 +538,25 @@ Each entry: the choice, the alternatives considered, and the reason.
   ASSD 0.551 mm (median 0.450), HD95 3.27 mm, F1@0.25 0.761, F1@0.5 0.815, tooth IoU 0.841.** Library path
   reproduces all three exactly. Example test scan EJWZZZRF_lower in the browser: ASSD 0.257 mm, F1@0.5 0.92, 733 ms.
 - Not yet analysed: which scans produce the HD95 tail (3.27 mm mean).
+
+## D74. Margin failure analysis (validation set: 240 training scans never used in the sweeps)
+- Tool `margin_analyze`: per-scan error decomposition (false vs missed margin, over- vs under-segmentation), error
+  by tooth category, and scan characteristics. The held-out test set is not used for analysis or tuning.
+- Findings: typical margin points are accurate (median missed-margin distance ~0.09 mm for every tooth category);
+  error is a tail of localized gross failures (p95 2.6-3.6 mm; incisors mean 0.72, molars 0.61, canines 0.54,
+  premolars 0.40 mm). Over-segmentation dominates: 14.9% vs 3.1% of true tooth area (gingiva labelled tooth vs
+  the reverse); over-segmentation correlates most with per-scan ASSD (r = +0.53).
+- Hypotheses tested: H1 cusp seeds on true gingiva: r = +0.38 with over-segmentation, +0.46 with ASSD; 179/240
+  scans have >= 1 such seed (mean ASSD 0.648 vs 0.422 mm without). H2 resolution: rejected (mean edge length
+  r = +0.09 / -0.07; vertex count correlates via scan extent). H3 handles: genus r = +0.48 with ASSD, +0.21 with
+  over-segmentation (contributor, partly confounded). Second, separate mode seen visually: false margin loops at
+  the distal ends behind the last molars on fragmented scans (HD95 up to 16 mm).
+
+## D75. Seed-filtering experiment (validation) and oracle bound
+- Label-free fix tried: keep cusp seeds only above an arch-height quantile. ASSD 0.590 (none), 0.585 (q 0.6),
+  0.597 (0.7), 0.667 (0.8), 1.331 (0.9): height does not separate gingival false cusps from real ones. **Not
+  adopted** (0.005 mm is noise; adopting it would overfit validation). `cusp_seed_quantile` defaults to 0.
+- **Oracle** (seeds on true gingiva removed using labels, diagnostic only): ASSD 0.504 mm (-15%), HD95 3.13, IoU
+  0.896. That is the ceiling for seed filtering, and it needs a better tooth/gingiva discriminator than height
+  (local shape features or a small learned classifier, D61). Even the oracle leaves the other failure modes
+  (distal ends, handles).

@@ -159,7 +159,10 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     }
     for (std::uint32_t v : in.cut_vertices) label[v] = 0;
     if (p.cusp_seeds) {
-        for (std::uint32_t v : in.cusp_tips) label[v] = 1;
+        const double seed_gate = q(p.cusp_seed_quantile);
+        for (std::uint32_t v : in.cusp_tips) {
+            if (p.cusp_seed_quantile <= 0.0 || in.height[v] >= seed_gate) label[v] = 1;
+        }
     }
     // Two-label multi-source Dijkstra: each vertex takes the label of the front that arrives first.
     std::vector<double> dist(nv, std::numeric_limits<double>::infinity());

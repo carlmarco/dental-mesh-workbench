@@ -28,6 +28,7 @@ struct MarginParams {
     double gingiva_quantile = 0.15;  // gingiva seeds: arch vertices below this height quantile
     double tooth_quantile = 0.9;     // tooth seeds: arch vertices above this height quantile
     bool cusp_seeds = true;          // also seed teeth at detected cusp tips (detect_cusps, D68 point)
+    double cusp_seed_quantile = 0.0; // keep only cusp seeds above this arch-height quantile (D75; 0 = all)
 };
 
 struct MarginResult {

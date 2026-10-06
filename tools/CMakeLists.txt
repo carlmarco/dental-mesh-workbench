@@ -24,3 +24,9 @@ target_compile_options(cusp_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -
 add_executable(margin_eval margin_eval.cpp)
 target_link_libraries(margin_eval PRIVATE dmw_core)
 target_compile_options(margin_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Margin failure analysis on VALIDATION scans (training scans not used in the sweeps; D74):
+#   ./build-release/tools/margin_analyze data/data_part_1 build-release/margin_val.csv 5 0
+add_executable(margin_analyze margin_analyze.cpp)
+target_link_libraries(margin_analyze PRIVATE dmw_core)
+target_compile_options(margin_analyze PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
