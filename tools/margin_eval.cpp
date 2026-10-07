@@ -133,6 +133,10 @@ std::vector<Config> validate_configs() {
         c.push_back({graph_cut(false)});  // D80: where does the per-vertex error of the public method sit?
         return c;
     }
+    if (g_experiment == "errors_voronoi") {  // D82: the same decomposition for first-arrival Voronoi
+        c.push_back({voronoi(2560.0, 0.0, 0.15, 1.0, true)});
+        return c;
+    }
     if (g_experiment == "islands_validate") {
         MarginParams p = graph_cut(false);
         p.min_tooth_region = 20.0;
@@ -256,6 +260,14 @@ struct ErrorStats {
     double false_gingiva_missed = 0, false_gingiva_partial = 0, false_tooth = 0, false_tooth_near = 0, total_tooth = 0, total_area = 0;
     std::map<int, std::pair<int, int>> by_type;  // FDI unit digit -> (missed, total)
     int missed_with_seed = 0, missed_total = 0;
+    // D82 F1@0.5 decomposition, pooled over scans (boundary samples = edge midpoints, as in compare_boundaries).
+    // Recall misses (true samples > 0.5 mm from the predicted line), by the true tooth beside them:
+    std::size_t gt_samples = 0, r_missed_tooth = 0, r_near = 0, r_far = 0;  // near: 0.5-1 mm; far: > 1 mm
+    // Far recall misses: is the true-gingiva vertex beside them labelled tooth (over-extension), and does it lie
+    // within 1.5 mm of two different teeth (interdental papilla)?
+    std::size_t r_far_overext = 0, r_far_interdental = 0, r_far_overext_interdental = 0;
+    // Precision misses (predicted samples > 0.5 mm from the true line), by the predicted-tooth vertex beside them:
+    std::size_t pr_samples = 0, p_fake = 0, p_near = 0, p_far = 0;  // fake: that vertex is gingiva > 0.5 mm from any tooth
 };
 ErrorStats g_errors;
 void error_breakdown(const HalfEdgeMesh& m, const MarginInputs& in, std::span<const std::uint8_t> tooth,
@@ -285,6 +297,50 @@ void error_breakdown(const HalfEdgeMesh& m, const MarginInputs& in, std::span<co
         auto& bt = g_errors.by_type[t % 10];
         bt.second++, bt.first += missed;
         if (missed) g_errors.missed_total++, g_errors.missed_with_seed += seeded[t];
+    }
+
+    // --- F1@0.5 decomposition (D82).
+    const auto gt_edges = label_boundary_edges(m, truth), pr_edges = label_boundary_edges(m, tooth);
+    const auto gt_pts = edge_midpoints(m, gt_edges), pr_pts = edge_midpoints(m, pr_edges);
+    const auto gt_to_pr = nearest_point_distances(gt_pts, pr_pts, 0.5), pr_to_gt = nearest_point_distances(pr_pts, gt_pts, 0.5);
+    g_errors.gt_samples += gt_pts.size();
+    g_errors.pr_samples += pr_pts.size();
+    for (std::size_t k = 0; k < gt_pts.size(); ++k) {
+        if (gt_to_pr[k] <= 0.5) continue;
+        const std::uint32_t tv = truth[gt_edges[k].v0] ? gt_edges[k].v0 : gt_edges[k].v1;  // the true-tooth side
+        const int t = fdi[tv];
+        const bool missed = t != 0 && covered[t] < 0.5 * total[t];
+        if (missed) {
+            ++g_errors.r_missed_tooth;
+        } else if (gt_to_pr[k] <= 1.0) {
+            ++g_errors.r_near;
+        } else {
+            ++g_errors.r_far;
+            const std::uint32_t gv = tv == gt_edges[k].v0 ? gt_edges[k].v1 : gt_edges[k].v0;  // true-gingiva side
+            const bool over = tooth[gv] != 0;
+            // Distinct teeth within 1.5 mm of the gingiva vertex (brute force: few far misses per scan).
+            int first = 0;
+            bool two = false;
+            for (std::size_t v = 0; v < fdi.size() && !two; ++v) {
+                if (fdi[v] == 0 || fdi[v] == first) continue;
+                const Vec3 d{m.positions[v].x - m.positions[gv].x, m.positions[v].y - m.positions[gv].y, m.positions[v].z - m.positions[gv].z};
+                if (d.x * d.x + d.y * d.y + d.z * d.z > 2.25) continue;
+                if (first == 0) first = fdi[v];
+                else two = true;
+            }
+            g_errors.r_far_overext += over, g_errors.r_far_interdental += two, g_errors.r_far_overext_interdental += over && two;
+        }
+    }
+    // Distance from each predicted-tooth-side vertex to the nearest true tooth vertex (fake-region test).
+    std::vector<Vec3> side;
+    for (const Edge& e : pr_edges) side.push_back(m.positions[tooth[e.v0] ? e.v0 : e.v1]);
+    const auto side_to_tooth = nearest_point_distances(side, tt, 0.5);
+    for (std::size_t k = 0; k < pr_pts.size(); ++k) {
+        if (pr_to_gt[k] <= 0.5) continue;
+        const std::uint32_t pv = tooth[pr_edges[k].v0] ? pr_edges[k].v0 : pr_edges[k].v1;
+        if (!truth[pv] && side_to_tooth[k] > 0.5) ++g_errors.p_fake;
+        else if (pr_to_gt[k] <= 1.0) ++g_errors.p_near;
+        else ++g_errors.p_far;
     }
 }
 
@@ -405,7 +461,7 @@ int main(int argc, char** argv) {
             totals[c].add(compare_boundaries(edge_midpoints(m, label_boundary_edges(m, tooth)), gt_line),
                           region_iou(tooth, truth, ops.star0));
             totals[c].add_vertex(tooth, truth);
-            if (g_experiment == "errors") error_breakdown(m, in, tooth, truth, fdi, ops.star0);
+            if (g_experiment.rfind("errors", 0) == 0) error_breakdown(m, in, tooth, truth, fdi, ops.star0);
             if (mode == "test") {  // the library path, end to end
                 const MarginResult lib = detect_margin(m, p);
                 library[c].add(compare_boundaries(edge_midpoints(m, lib.margin), gt_line), region_iou(lib.tooth, truth, ops.star0));
@@ -438,7 +494,7 @@ int main(int argc, char** argv) {
         std::printf("  %-60s accuracy %.4f, tooth IoU %.4f, gingiva IoU %.4f, mean of the two %.4f\n", configs[i].label().c_str(),
                     mean(totals[i].vacc), mean(totals[i].viou_tooth), mean(totals[i].viou_gingiva),
                     0.5 * (mean(totals[i].viou_tooth) + mean(totals[i].viou_gingiva)));
-    if (g_experiment == "errors") {
+    if (g_experiment.rfind("errors", 0) == 0) {
         const auto& e = g_errors;
         const double err = e.false_gingiva_missed + e.false_gingiva_partial + e.false_tooth;
         std::printf("\nerror breakdown (area-weighted, all scans): total error %.1f%% of arch area\n", 100.0 * err / e.total_area);
@@ -450,6 +506,18 @@ int main(int argc, char** argv) {
                     e.missed_total, e.missed_with_seed);
         for (const auto& [t, mt] : e.by_type) std::printf(" %d: %d/%d", t, mt.first, mt.second);
         std::printf("\n");
+        const double rg = double(e.gt_samples), pg = double(e.pr_samples);
+        const double r_miss = double(e.r_missed_tooth + e.r_near + e.r_far), p_miss = double(e.p_fake + e.p_near + e.p_far);
+        const double recall = 1.0 - r_miss / rg, precision = 1.0 - p_miss / pg;
+        std::printf("\nF1@0.5 decomposition (pooled boundary samples): precision %.3f, recall %.3f, pooled F1 %.3f\n", precision,
+                    recall, 2 * precision * recall / (precision + recall));
+        std::printf("  recall misses (%.1f%% of true samples): on missed teeth %.1f%%, 0.5-1 mm off %.1f%%, > 1 mm off %.1f%%\n",
+                    100 * r_miss / rg, 100 * e.r_missed_tooth / rg, 100 * e.r_near / rg, 100 * e.r_far / rg);
+        std::printf("    of the > 1 mm recall misses: gingiva side labelled tooth (over-extension) %.1f%%, interdental (two teeth"
+                    " within 1.5 mm) %.1f%%, both %.1f%%\n", 100.0 * double(e.r_far_overext) / double(e.r_far),
+                    100.0 * double(e.r_far_interdental) / double(e.r_far), 100.0 * double(e.r_far_overext_interdental) / double(e.r_far));
+        std::printf("  precision misses (%.1f%% of predicted samples): fake regions on gingiva %.1f%%, 0.5-1 mm off %.1f%%,"
+                    " > 1 mm off (not fake) %.1f%%\n", 100 * p_miss / pg, 100 * e.p_fake / pg, 100 * e.p_near / pg, 100 * e.p_far / pg);
     }
     std::printf("\nlabelling time per scan (ms, after shared inputs; native Release):");
     for (const auto& t : totals) std::printf(" %.0f", t.label_ms / double(std::max<std::size_t>(used, 1)));

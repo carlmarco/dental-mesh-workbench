@@ -699,3 +699,22 @@ Each entry: the choice, the alternatives considered, and the reason.
   (labels != 0 = tooth) with the same metrics, paired against the graph cut on the same scans; scans without a
   usable prediction (missing, or wrong vertex count) are skipped and counted. Checked: ground truth fed in as the
   prediction scores ASSD 0, F1 1, IoU 1; a truncated label file is skipped.
+
+## D82. Why boundary F1@0.5 stays below 0.9: decomposition of the misses (validation, 120 scans)
+- Boundary samples (edge midpoints) pooled over scans. Graph cut: precision 0.918, recall 0.855, pooled F1 0.885
+  (the per-scan mean is 0.886). F1 is recall-limited.
+- Recall misses, 14.5% of true samples: on missed teeth 1.5%; 0.5-1 mm off 3.6%; > 1 mm off on teeth that were
+  found 9.4%. Of those 9.4%: the gingiva vertex beside the true edge is labelled tooth (over-extension) in 81.7%,
+  it lies within 1.5 mm of two different teeth (interdental) in 61.0%, both in 60.1%. So **~5.6% of the true
+  boundary is lost to interdental papillae labelled tooth (bridged between neighbouring crowns)**, the largest
+  single F1 loss. It costs recall only: a bridged papilla removes true boundary without adding predicted boundary.
+- Precision misses, 8.2% of predicted samples: fake regions on gingiva (tooth side > 0.5 mm from any tooth) 4.0%;
+  0.5-1 mm off 1.1%; > 1 mm off but not fake 3.1%.
+- Hypothesis tested and rejected: that the bridging comes from the cut's length term (going round a thin papilla
+  costs more boundary than cutting across). Voronoi, which has no length term, bridges as much or more: recall
+  0.801, far misses 15.1%, 44.9% of them bridged papillae = ~6.8% of the true boundary. The geometry around the
+  papilla does not separate it for either method (plausibly weak or missing interproximal creases where the
+  scanner cannot see between teeth; not verified).
+- Fake regions are where the cut gained most over Voronoi: 10.8% -> 4.0% of predicted samples.
+- Implication: the next F1 gain needs per-tooth knowledge (which papilla belongs between which two teeth), i.e.
+  instance-level evidence from a learned model; tuning the cut will not recover papillae.
