@@ -34,8 +34,8 @@ struct Config {
         char b[160];
         if (p.method == Method::HeightPlane) std::snprintf(b, sizeof b, "plane cut q=%.2f", p.plane_quantile);
         else if (p.method == Method::GraphCut)
-            std::snprintf(b, sizeof b, "GraphCut mu=%.2f beta=%.0f alpha=%.0f tq=%.2f%s", p.cut_smoothness, p.cut_crease,
-                          p.valley_weight, p.tooth_quantile, p.seed_model ? " + classifier" : "");
+            std::snprintf(b, sizeof b, "GraphCut mu=%.2f beta=%.0f alpha=%.0f tq=%.2f islands<%.0f%s", p.cut_smoothness, p.cut_crease,
+                          p.valley_weight, p.tooth_quantile, p.min_tooth_region, p.seed_model ? " + classifier" : "");
         else if (p.cusp_seed_quantile == kHeightOracle) std::snprintf(b, sizeof b, "ORACLE: height seeds on true gingiva removed (+clf)");
         else if (p.cusp_seed_quantile == kBothOracles) std::snprintf(b, sizeof b, "ORACLE: all tooth seeds on true gingiva removed");
         else if (p.cusp_seed_quantile < 0.0) std::snprintf(b, sizeof b, "ORACLE: cusp seeds on true gingiva removed");
@@ -115,6 +115,28 @@ std::vector<Config> validate_configs() {
                 p.method = Method::GraphCut, p.cut_smoothness = mu, p.cut_crease = beta;
                 c.push_back({p});
             }
+        return c;
+    }
+    if (g_experiment == "errors") {
+        c.push_back({graph_cut(false)});  // D80: where does the per-vertex error of the public method sit?
+        return c;
+    }
+    if (g_experiment == "islands_validate") {
+        MarginParams p = graph_cut(false);
+        p.min_tooth_region = 20.0;
+        c.push_back({graph_cut(false)});
+        c.push_back({p});
+        return c;
+    }
+    if (g_experiment == "islands") {
+        // D80: island removal (as in ToothGroupNetwork's post-processing); tuned on the 60 sweep scans.
+        // (Seed discs of radius 0.5-2 mm were tried first and hurt: +0.042..+0.092 mm.)
+        c.push_back({graph_cut(false)});
+        for (double a : {20.0, 40.0, 80.0}) {  // sweep 1: 2, 5, 10, 20 (best 20, edge); sweep 2: 20 best, 80 deletes teeth
+            MarginParams p = graph_cut(false);
+            p.min_tooth_region = a;
+            c.push_back({p});
+        }
         return c;
     }
     if (g_experiment == "graphcut_validate") {
@@ -215,6 +237,45 @@ double median(std::vector<double> v) {
     return v[v.size() / 2];
 }
 
+// D80 error breakdown (area-weighted, summed over scans): false gingiva (tooth vertices labelled gingiva)
+// split into whole missed teeth (< 50% of the tooth labelled tooth) vs partially covered teeth; false
+// tooth; plus per-tooth-type miss rates and whether a missed tooth had a seed.
+struct ErrorStats {
+    double false_gingiva_missed = 0, false_gingiva_partial = 0, false_tooth = 0, false_tooth_near = 0, total_tooth = 0, total_area = 0;
+    std::map<int, std::pair<int, int>> by_type;  // FDI unit digit -> (missed, total)
+    int missed_with_seed = 0, missed_total = 0;
+};
+ErrorStats g_errors;
+void error_breakdown(const HalfEdgeMesh& m, const MarginInputs& in, std::span<const std::uint8_t> tooth,
+                     std::span<const std::uint8_t> truth, const std::vector<int>& fdi, std::span<const double> area) {
+    std::map<int, double> covered, total;
+    for (std::size_t v = 0; v < tooth.size(); ++v) {
+        g_errors.total_area += area[v];
+        if (fdi[v] != 0) total[fdi[v]] += area[v], covered[fdi[v]] += tooth[v] ? area[v] : 0.0;
+        if (tooth[v] && !truth[v]) g_errors.false_tooth += area[v];
+    }
+    // False tooth within 0.5 mm of a true tooth vertex = boundary offset; farther = leak / fake region.
+    std::vector<Vec3> ft, tt;
+    std::vector<double> ft_area;
+    for (std::size_t v = 0; v < tooth.size(); ++v) {
+        if (truth[v]) tt.push_back(m.positions[v]);
+        if (tooth[v] && !truth[v]) ft.push_back(m.positions[v]), ft_area.push_back(area[v]);
+    }
+    const auto dn = nearest_point_distances(ft, tt, 0.5);
+    for (std::size_t k = 0; k < ft.size(); ++k) g_errors.false_tooth_near += dn[k] <= 0.5 ? ft_area[k] : 0.0;
+    std::map<int, bool> seeded;
+    for (std::uint32_t v : in.cusp_tips)
+        if (fdi[v] != 0) seeded[fdi[v]] = true;
+    for (const auto& [t, a] : total) {
+        const bool missed = covered[t] < 0.5 * a;
+        g_errors.total_tooth += a;
+        (missed ? g_errors.false_gingiva_missed : g_errors.false_gingiva_partial) += a - covered[t];
+        auto& bt = g_errors.by_type[t % 10];
+        bt.second++, bt.first += missed;
+        if (missed) g_errors.missed_total++, g_errors.missed_with_seed += seeded[t];
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -259,6 +320,8 @@ int main(int argc, char** argv) {
         const HalfEdgeMesh& m = analysis.halfedge;
         std::vector<std::uint8_t> truth(m.positions.size());
         for (std::size_t v = 0; v < truth.size(); ++v) truth[v] = arr->array[v].number != 0.0 ? 1 : 0;
+        std::vector<int> fdi(m.positions.size());
+        for (std::size_t v = 0; v < fdi.size(); ++v) fdi[v] = static_cast<int>(arr->array[v].number);
         const auto gt_line = edge_midpoints(m, label_boundary_edges(m, truth));
         ++used;
 
@@ -307,6 +370,7 @@ int main(int argc, char** argv) {
             totals[c].add(compare_boundaries(edge_midpoints(m, label_boundary_edges(m, tooth)), gt_line),
                           region_iou(tooth, truth, ops.star0));
             totals[c].add_vertex(tooth, truth);
+            if (g_experiment == "errors") error_breakdown(m, in, tooth, truth, fdi, ops.star0);
             if (mode == "test") {  // the library path, end to end
                 const MarginResult lib = detect_margin(m, p);
                 library[c].add(compare_boundaries(edge_midpoints(m, lib.margin), gt_line), region_iou(lib.tooth, truth, ops.star0));
@@ -339,6 +403,19 @@ int main(int argc, char** argv) {
         std::printf("  %-60s accuracy %.4f, tooth IoU %.4f, gingiva IoU %.4f, mean of the two %.4f\n", configs[i].label().c_str(),
                     mean(totals[i].vacc), mean(totals[i].viou_tooth), mean(totals[i].viou_gingiva),
                     0.5 * (mean(totals[i].viou_tooth) + mean(totals[i].viou_gingiva)));
+    if (g_experiment == "errors") {
+        const auto& e = g_errors;
+        const double err = e.false_gingiva_missed + e.false_gingiva_partial + e.false_tooth;
+        std::printf("\nerror breakdown (area-weighted, all scans): total error %.1f%% of arch area\n", 100.0 * err / e.total_area);
+        std::printf("  false gingiva in MISSED teeth (<50%% covered): %.1f%% of error\n", 100.0 * e.false_gingiva_missed / err);
+        std::printf("  false gingiva in partially covered teeth:      %.1f%% of error\n", 100.0 * e.false_gingiva_partial / err);
+        std::printf("  false tooth (gingiva labelled tooth):          %.1f%% of error (%.1f%% within 0.5 mm of a true tooth)\n",
+                    100.0 * e.false_tooth / err, 100.0 * e.false_tooth_near / err);
+        std::printf("  missed teeth: %d (%d had a cusp seed on them)\n  miss rate by tooth type (FDI unit digit):",
+                    e.missed_total, e.missed_with_seed);
+        for (const auto& [t, mt] : e.by_type) std::printf(" %d: %d/%d", t, mt.first, mt.second);
+        std::printf("\n");
+    }
     std::printf("\nlabelling time per scan (ms, after shared inputs; native Release):");
     for (const auto& t : totals) std::printf(" %.0f", t.label_ms / double(std::max<std::size_t>(used, 1)));
     std::printf("\n");

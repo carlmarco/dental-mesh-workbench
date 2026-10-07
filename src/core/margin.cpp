@@ -57,6 +57,34 @@ std::vector<double> nearest_distances(std::span<const Vec3> query, std::span<con
     return out;
 }
 
+// Island removal (D80): connected tooth regions (over mesh edges) with lumped area below `min_area`
+// become gingiva. A real crown is tens of mm^2; specks around false seeds are far smaller.
+void remove_small_tooth_regions(const HalfEdgeMesh& m, std::vector<std::uint8_t>& tooth, double min_area) {
+    if (min_area <= 0.0) return;
+    const std::size_t nv = m.positions.size();
+    std::vector<double> area(nv, 0.0);
+    for (std::size_t f = 0; f < m.origin.size() / 3; ++f) {
+        const std::uint32_t a = m.origin[3 * f], b = m.origin[3 * f + 1], c = m.origin[3 * f + 2];
+        const double t = 0.5 * norm(cross(m.positions[b] - m.positions[a], m.positions[c] - m.positions[a])) / 3.0;
+        area[a] += t, area[b] += t, area[c] += t;
+    }
+    std::vector<std::uint8_t> seen(nv, 0);
+    std::vector<std::uint32_t> region;
+    for (std::uint32_t s = 0; s < nv; ++s) {
+        if (!tooth[s] || seen[s]) continue;
+        region.assign(1, s);
+        seen[s] = 1;
+        double total = 0.0;
+        for (std::size_t k = 0; k < region.size(); ++k) {
+            total += area[region[k]];
+            for (std::uint32_t w : one_ring(m, region[k]))
+                if (tooth[w] && !seen[w]) seen[w] = 1, region.push_back(w);
+        }
+        if (total < min_area)
+            for (std::uint32_t v : region) tooth[v] = 0;
+    }
+}
+
 }  // namespace
 
 const std::vector<std::string>& seed_feature_names() {
@@ -254,6 +282,7 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
         std::vector<double> dist;
         arrival([](std::uint8_t l) { return l != 2; }, dist, &label);
         for (std::size_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && label[v] == 1) ? 1 : 0;
+        remove_small_tooth_regions(m, tooth, p.min_tooth_region);
         return tooth;
     }
 
@@ -312,6 +341,7 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     }
     g.solve();
     for (std::uint32_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && g.source_side(node[v])) ? 1 : 0;
+    remove_small_tooth_regions(m, tooth, p.min_tooth_region);
     return tooth;
 }
 

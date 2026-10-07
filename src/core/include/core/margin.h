@@ -36,6 +36,7 @@ struct MarginParams {
     double tooth_quantile = 0.9;     // tooth seeds: arch vertices above this height quantile
     double cut_smoothness = 1.0;     // GraphCut: mu (mm), boundary cost per mm of cut on flat surface
     double cut_crease = 100.0;       // GraphCut: beta (mm), how much cheaper a cut is along a crease
+    double min_tooth_region = 0.0;   // relabel tooth components smaller than this area (mm^2) as gingiva (D80)
     bool cusp_seeds = true;          // also seed teeth at detected cusp tips (detect_cusps, D68 point)
     double cusp_seed_quantile = 0.0; // keep only cusp seeds above this arch-height quantile (D75; 0 = all)
     // Seed classifier (D76): drop cusp seeds with P(tooth) < seed_threshold. Non-owning; null = off.

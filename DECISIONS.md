@@ -662,3 +662,22 @@ Each entry: the choice, the alternatives considered, and the reason.
   10.3%), on a different split, with ~1,400 labelled training scans vs our 3 tuned parameters and a 6-feature
   classifier that the cut no longer needs. The project's strength is the geometry, verification and evaluation
   discipline, not state-of-the-art accuracy. Boundary-distance metrics have no published counterpart to compare.
+
+## D80. What limits gingiva IoU and F1 now: error decomposition, two cheap fixes tried and rejected
+- Decomposition (validation, 120 scans, public graph cut; area-weighted): total error 1.6% of arch area. False
+  gingiva in teeth missed entirely (< 50% covered) 18.9% of the error; in partially covered teeth 31.4%; false
+  tooth 49.7%, of which only 15.8 points lie within 0.5 mm of a true tooth (boundary offset) and ~34 points
+  farther (fake regions, mostly attached to real teeth). Missed teeth: 31 of 1,809 (incisors worst, 10/240);
+  21 of the 31 carried a cusp seed, so the cut shrank around a point seed.
+- Metric caveat: per-vertex gingiva IoU (0.909 here) is far below the area-weighted value (~0.98) because scans
+  are much denser on teeth and near the margin: per-vertex scores magnify boundary error. Published per-point
+  numbers use other samplings (D79), so cross-paper IoU comparisons carry this uncertainty.
+- Tried, sweep scans then validation: (1) seed discs (each cusp seed grown to a geodesic disc, against the
+  shrinking bias): worse at every radius, 0.5 mm +0.042 mm (t +2.4); discs also inflate false seeds. Removed.
+  (2) Island removal (tooth components < A mm^2 -> gingiva, as in ToothGroupNetwork's post-processing): sweep
+  A {2..20}, then {20, 40, 80}: best 20 mm^2, -0.027 mm (t -3.9, worse 3/60); 80 deletes real teeth. Validation:
+  -0.005 mm (t -0.7), HD95 2.38 -> 2.43, one scan +0.69 mm. **Not adopted** (did not replicate; D75 rule).
+  `min_tooth_region` stays, default 0 (off).
+- Conclusion: the cheap geometric levers are spent. The remaining error (attached fake regions, missed and
+  partially covered teeth) needs per-tooth evidence a learned model provides; the honest next comparisons are
+  a state-of-the-art network scored by this tool on the same scans, and a fresh, never-used test set.
