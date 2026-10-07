@@ -187,6 +187,19 @@ std::vector<Config> validate_configs() {
 struct Totals {
     std::vector<double> assd, hd95, f1_025, f1_050, iou;
     double label_ms = 0.0;  // labelling step only (inputs are shared across configurations)
+    // Per-vertex (unweighted) binary metrics, the convention of the deep-learning papers (comparison only).
+    std::vector<double> vacc, viou_tooth, viou_gingiva;
+    void add_vertex(std::span<const std::uint8_t> pred, std::span<const std::uint8_t> truth) {
+        std::size_t ok = 0, tt = 0, tu = 0, gi = 0, gu = 0;
+        for (std::size_t v = 0; v < pred.size(); ++v) {
+            ok += pred[v] == truth[v];
+            tt += pred[v] && truth[v], tu += pred[v] || truth[v];
+            gi += !pred[v] && !truth[v], gu += !pred[v] || !truth[v];
+        }
+        vacc.push_back(double(ok) / double(pred.size()));
+        viou_tooth.push_back(tu ? double(tt) / double(tu) : 1.0);
+        viou_gingiva.push_back(gu ? double(gi) / double(gu) : 1.0);
+    }
     void add(const BoundaryMetrics& b, double i) {
         assd.push_back(b.assd), hd95.push_back(b.hd95), f1_025.push_back(b.f1_025), f1_050.push_back(b.f1_050), iou.push_back(i);
     }
@@ -293,6 +306,7 @@ int main(int argc, char** argv) {
             }
             totals[c].add(compare_boundaries(edge_midpoints(m, label_boundary_edges(m, tooth)), gt_line),
                           region_iou(tooth, truth, ops.star0));
+            totals[c].add_vertex(tooth, truth);
             if (mode == "test") {  // the library path, end to end
                 const MarginResult lib = detect_margin(m, p);
                 library[c].add(compare_boundaries(edge_midpoints(m, lib.margin), gt_line), region_iou(lib.tooth, truth, ops.star0));
@@ -320,6 +334,11 @@ int main(int argc, char** argv) {
                 std::printf("| (ablation) %s | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f |\n", configs[i].label().c_str(), mean(totals[i].assd),
                             median(totals[i].assd), mean(totals[i].hd95), mean(totals[i].f1_025), mean(totals[i].f1_050), mean(totals[i].iou));
     }
+    std::printf("\nper-vertex binary metrics (unweighted; for comparison with published per-point results):\n");
+    for (std::size_t i = 0; i < configs.size(); ++i)
+        std::printf("  %-60s accuracy %.4f, tooth IoU %.4f, gingiva IoU %.4f, mean of the two %.4f\n", configs[i].label().c_str(),
+                    mean(totals[i].vacc), mean(totals[i].viou_tooth), mean(totals[i].viou_gingiva),
+                    0.5 * (mean(totals[i].viou_tooth) + mean(totals[i].viou_gingiva)));
     std::printf("\nlabelling time per scan (ms, after shared inputs; native Release):");
     for (const auto& t : totals) std::printf(" %.0f", t.label_ms / double(std::max<std::size_t>(used, 1)));
     std::printf("\n");

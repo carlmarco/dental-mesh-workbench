@@ -647,3 +647,18 @@ Each entry: the choice, the alternatives considered, and the reason.
 - Four test evaluations of the margin have now been run, each disclosed; the test set is no longer pristine
   in the strict sense (method choices were made after seeing earlier test numbers). Next margin claim should
   come from a fresh split or be flagged.
+
+## D79. Where the margin result stands against published methods (2026-10-07)
+- Published Teeth3DS results are supervised deep networks trained on ~1,200-1,440 labelled scans and scored per
+  point over 17 classes (16 teeth + gingiva), mostly per-tooth IoU; none found reports tooth-gingiva boundary
+  distance (ASSD/HD95 in mm). Closest numbers: CrossTooth (arXiv 2503.23702, 1,440/360 split) gingiva-class IoU
+  96.41%, overall mIoU 95.86%, boundary IoU 82.06%; 3DTeethSAM (AAAI 2026, official 1,200/600) OA 95.48% (17-class),
+  tooth-wise mIoU 91.90%; 3DTeethSeg'22 winner TSA 0.9859 (per-tooth F1). Prepared-tooth margin lines (a different
+  task, private data, Alsheghri et al. 2024): median chamfer 0.137 mm, median Hausdorff 0.242 mm.
+- To compare on a shared metric, margin_eval now also prints per-vertex (unweighted) binary metrics. Frozen
+  methods, test split (300 scans), measurement only (no selection): GraphCut accuracy 0.9526, tooth IoU 0.9199,
+  gingiva IoU **0.8967** (Voronoi 0.8656). Rows reproduce D78 exactly.
+- Reading: on gingiva IoU the supervised state of the art is ~96.4% vs our 89.7%: about 3x our error (3.6% vs
+  10.3%), on a different split, with ~1,400 labelled training scans vs our 3 tuned parameters and a 6-feature
+  classifier that the cut no longer needs. The project's strength is the geometry, verification and evaluation
+  discipline, not state-of-the-art accuracy. Boundary-distance metrics have no published counterpart to compare.

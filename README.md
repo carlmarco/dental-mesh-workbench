@@ -168,6 +168,9 @@ breakdown comes from `dmw_bench`.
   (D10). Topology diagnostics still work on any mesh.
 - **Handle loops are valid generators, not the shortest in their homology class.** Their lengths are upper bounds
   on handle size (measured 3.5× the tight cycle on a synthetic handle, D64).
+- **Not state of the art in accuracy:** per vertex, the graph cut reaches gingiva IoU 0.897 on the test split;
+  supervised networks trained on ~1,400 labelled scans report ~0.964 (CrossTooth, different split). This is a
+  training-free geometric method with 3 tuned parameters; see D79 for the comparison and its caveats.
 - **The margin still has a tail:** HD95 is 2.34 mm on average. The graph cut (D78) removed most false tooth regions
   that first-arrival Voronoi let flood the gingiva, but the margin has now been evaluated on the test split four
   times (each disclosed), so the next claim should come from fresh data.
