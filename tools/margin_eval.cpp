@@ -1,6 +1,10 @@
 // Tooth-gingiva margin evaluation against Teeth3DS per-vertex labels (D71, D72, D73).
 //   margin_eval sweep <scan-dir> [stride]   parameter sweep on TRAINING scans (every stride-th scan)
 //   margin_eval test  <scan-dir>            fixed operating points on TEST scans (run once)
+//   margin_eval score <scan-dir> <pred-dir> [label]
+//                                            EXTERNAL predictions (D81): <pred-dir>/<name>.json in the Teeth3DS
+//                                            label format (e.g. ToothGroupNetwork output), any label != 0 = tooth;
+//                                            scored with the same metrics, paired against the public graph cut
 //   margin_eval validate <scan-dir> <stride> [min_remainder] [model.json]
 //                                            VALIDATION: scans with index % stride >= min_remainder (default
 //                                            1, i.e. not in the sweep); optional seed classifier (D74-D76)
@@ -27,12 +31,15 @@ namespace {
 
 // Sentinel values of cusp_seed_quantile that select label-using ORACLE diagnostics (D75, D77).
 constexpr double kOracle = -1.0, kHeightOracle = -2.0, kBothOracles = -3.0;
+constexpr double kExternal = -4.0;  // score mode: labels read from a prediction file, not computed (D81)
+std::string g_external_label = "external predictions";
 
 struct Config {
     MarginParams p;
     std::string label() const {
         char b[160];
-        if (p.method == Method::HeightPlane) std::snprintf(b, sizeof b, "plane cut q=%.2f", p.plane_quantile);
+        if (p.cusp_seed_quantile == kExternal) std::snprintf(b, sizeof b, "%s", g_external_label.c_str());
+        else if (p.method == Method::HeightPlane) std::snprintf(b, sizeof b, "plane cut q=%.2f", p.plane_quantile);
         else if (p.method == Method::GraphCut)
             std::snprintf(b, sizeof b, "GraphCut mu=%.2f beta=%.0f alpha=%.0f tq=%.2f islands<%.0f%s", p.cut_smoothness, p.cut_crease,
                           p.valley_weight, p.tooth_quantile, p.min_tooth_region, p.seed_model ? " + classifier" : "");
@@ -85,6 +92,11 @@ MarginParams graph_cut(bool clf) {
     p.method = Method::GraphCut, p.cut_smoothness = 1000.0, p.cut_crease = 300.0;
     if (clf) p.seed_model = g_seed_model, p.seed_threshold = 0.5;
     return p;
+}
+std::vector<Config> score_configs() {
+    MarginParams ext;
+    ext.cusp_seed_quantile = kExternal;
+    return {{graph_cut(false)}, {ext}};
 }
 std::vector<Config> test_configs() {
     std::vector<Config> c{{voronoi(2560.0, 0.0, 0.15, 1.0, true)}, {graph_cut(false)}};  // public point before / after D78
@@ -280,14 +292,20 @@ void error_breakdown(const HalfEdgeMesh& m, const MarginInputs& in, std::span<co
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::fprintf(stderr, "usage: margin_eval sweep|test <scan-dir> [stride]\n");
+        std::fprintf(stderr, "usage: margin_eval sweep|test|validate|score <scan-dir> ... (see the header comment)\n");
         return 2;
     }
     const std::string mode = argv[1];
-    const std::size_t stride = argc > 3 ? std::stoul(argv[3]) : 1;
-    const std::size_t min_remainder = argc > 4 ? std::stoul(argv[4]) : 1;
+    const bool score = mode == "score";
+    if (score && argc < 4) {
+        std::fprintf(stderr, "usage: margin_eval score <scan-dir> <pred-dir> [label]\n");
+        return 2;
+    }
+    if (score && argc > 4) g_external_label = argv[4];
+    const std::size_t stride = !score && argc > 3 ? std::stoul(argv[3]) : 1;
+    const std::size_t min_remainder = !score && argc > 4 ? std::stoul(argv[4]) : 1;
     LogisticModel seed_model;
-    if (argc > 5) {
+    if (!score && argc > 5) {
         std::string err;
         seed_model = parse_logistic_model(dataset::read_text(argv[5]), err);
         if (!err.empty()) {
@@ -296,11 +314,16 @@ int main(int argc, char** argv) {
         }
     }
     g_seed_model = seed_model.weights.empty() ? nullptr : &seed_model;
-    if (argc > 6) g_experiment = argv[6];
-    const std::size_t max_remainder = argc > 7 ? std::stoul(argv[7]) : stride - 1;
+    if (!score && argc > 6) g_experiment = argv[6];
+    const std::size_t max_remainder = !score && argc > 7 ? std::stoul(argv[7]) : stride - 1;
     const auto objs = dataset::index_files({argv[2]}, ".obj");
     const auto labels = dataset::index_files({argv[2]}, ".json");
-    const std::vector<Config> configs = mode == "sweep" ? sweep_configs() : mode == "validate" ? validate_configs() : test_configs();
+    const auto predictions = score ? dataset::index_files({argv[3]}, ".json") : decltype(labels){};
+    const std::vector<Config> configs = mode == "sweep"      ? sweep_configs()
+                                        : mode == "validate" ? validate_configs()
+                                        : score              ? score_configs()
+                                                             : test_configs();
+    std::size_t no_prediction = 0;
     (void)seed_model;
     std::vector<Totals> totals(configs.size()), library(configs.size());
 
@@ -311,6 +334,15 @@ int main(int argc, char** argv) {
         if (mode == "validate" ? (rem < min_remainder || rem > max_remainder) : rem != 0) continue;
         const auto lab = labels.find(stem);
         if (lab == labels.end()) continue;
+        std::vector<std::uint8_t> external;  // score mode: the prediction, binarized (any tooth label = tooth)
+        if (score) {
+            const auto pr = predictions.find(stem);
+            if (pr == predictions.end()) { ++no_prediction; continue; }
+            const JsonResult pj = parse_json(dataset::read_text(pr->second));
+            const JsonValue* parr = pj.ok() ? pj.value.find("labels") : nullptr;
+            if (!parr) { ++no_prediction; continue; }
+            for (const JsonValue& x : parr->array) external.push_back(x.number != 0.0 ? 1 : 0);
+        }
         const JsonResult j = parse_json(dataset::read_text(lab->second));
         const LoadResult r = parse_obj(dataset::read_text(obj));
         const JsonValue* arr = j.ok() ? j.value.find("labels") : nullptr;
@@ -318,6 +350,7 @@ int main(int argc, char** argv) {
         const AnalysisMesh analysis = manifold_analysis_mesh(r.mesh);
         if (!analysis.manifold) { ++skipped; continue; }
         const HalfEdgeMesh& m = analysis.halfedge;
+        if (score && external.size() != m.positions.size()) { ++no_prediction; continue; }  // wrong vertex count
         std::vector<std::uint8_t> truth(m.positions.size());
         for (std::size_t v = 0; v < truth.size(); ++v) truth[v] = arr->array[v].number != 0.0 ? 1 : 0;
         std::vector<int> fdi(m.positions.size());
@@ -340,7 +373,9 @@ int main(int argc, char** argv) {
             }
             std::vector<std::uint8_t> tooth;
             std::vector<std::uint8_t> veto;
-            if (p.cusp_seed_quantile == kHeightOracle || p.cusp_seed_quantile == kBothOracles) {
+            if (p.cusp_seed_quantile == kExternal) {
+                tooth = external;
+            } else if (p.cusp_seed_quantile == kHeightOracle || p.cusp_seed_quantile == kBothOracles) {
                 // Oracles (diagnostics): veto tooth seeds on true gingiva. Height-only keeps cusp seeds
                 // as the classifier left them; "both" vetoes every gingival tooth seed.
                 MarginParams pp = p;
@@ -419,7 +454,8 @@ int main(int argc, char** argv) {
     std::printf("\nlabelling time per scan (ms, after shared inputs; native Release):");
     for (const auto& t : totals) std::printf(" %.0f", t.label_ms / double(std::max<std::size_t>(used, 1)));
     std::printf("\n");
-    if (mode == "validate" || (mode == "test" && g_seed_model)) {
+    if (score) std::printf("scans without a usable prediction (skipped, not scored): %zu\n", no_prediction);
+    if (mode == "validate" || score || (mode == "test" && g_seed_model)) {
         // Paired comparison on the same scans: is a gain real? Validate pairs every row with row 0; test
         // pairs every two rows (the disclosed runs compare old and new points with and without the classifier).
         auto paired = [&](std::size_t a, std::size_t b) {
@@ -442,7 +478,7 @@ int main(int argc, char** argv) {
         std::printf("\npaired per-scan ASSD difference (row index -> row index; negative = better):\n");
         for (std::size_t a = 0; a < configs.size(); ++a) {
             for (std::size_t b = a + 1; b < configs.size(); ++b) {
-                if (mode == "test" || a == 0) paired(a, b);
+                if (mode == "test" || score || a == 0) paired(a, b);
             }
         }
     }

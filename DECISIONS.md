@@ -681,3 +681,21 @@ Each entry: the choice, the alternatives considered, and the reason.
 - Conclusion: the cheap geometric levers are spent. The remaining error (attached fake regions, missed and
   partially covered teeth) needs per-tooth evidence a learned model provides; the honest next comparisons are
   a state-of-the-art network scored by this tool on the same scans, and a fresh, never-used test set.
+
+## D81. Fresh test data (Teeth3DS part 6), split audit, and a score mode for external predictions
+- Split audit (official lists in the Teeth3DS archive): parts 5 and 6 are exactly the Teeth3DS test split (300 +
+  300 jaws), part 1 is training. The split is per jaw, not per patient: 52 part-6 and 53 part-5 patients have
+  their other jaw in part 1. Mild for this method (3 tuned parameters, a 6-feature classifier), stated anyway.
+- Part 6 had never been used. **Frozen methods on part 6 (2026-10-07, first and only look):** 299 scans (1
+  skipped). GraphCut **0.357 mm** (median 0.271), HD95 2.37, F1@0.25 0.829, F1@0.5 **0.880**, area IoU **0.927**;
+  per-vertex accuracy 0.954, tooth IoU 0.920, gingiva IoU 0.901. Voronoi 0.580; paired -0.223 mm, t = -12.5,
+  better on 258 / worse on 41 (3 by > 0.1 mm, largest +0.558). Classifier on top: 0.351 (-0.006, t -3.4).
+  Part 5 gave 0.338 / 0.883 / 0.925: the result replicates on fresh data within 0.02 mm. This is the headline.
+- ToothGroupNetwork comparison: its challenge checkpoints were trained on the 3DTeethSeg'22 training lists,
+  which differ from the Teeth3DS split: 216 of part 6's scans are in the challenge TRAINING set. Only 84 part-6
+  scans (90 in part 5) are in the challenge private test set; those 84 are unseen by both methods, so they are
+  the comparison set. tools/tgn/prepare_input.py packages them; docs/TGN_COLAB.md runs the network on Colab.
+- `margin_eval score <scan-dir> <pred-dir> [label]` scores any per-vertex prediction in the Teeth3DS label format
+  (labels != 0 = tooth) with the same metrics, paired against the graph cut on the same scans; scans without a
+  usable prediction (missing, or wrong vertex count) are skipped and counted. Checked: ground truth fed in as the
+  prediction scores ASSD 0, F1 1, IoU 1; a truncated label file is skipped.
