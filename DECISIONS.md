@@ -840,3 +840,16 @@ Each entry: the choice, the alternatives considered, and the reason.
   large regressions appear. **Not adopted** (D76/D77 reliability rule). Code stays, off by default; the model file
   is local (data/models, licence question as D76). A binned (additive) model could calibrate better; headroom is
   small because the dominant signal is already in the cut.
+
+## D89. M10a: BVH ray casting (infrastructure for undercut and thickness tools)
+- core/bvh: bounding-volume hierarchy built top-down with the binned surface-area heuristic (12 bins over all three
+  axes, leaves of <= 4 triangles; MacDonald & Booth 1990, binning after Wald 2007), iterative near-child-first
+  traversal with t_max shrinking, Moller-Trumbore ray-triangle tests (1997). Queries: nearest hit (t, face,
+  barycentrics) and any-hit occlusion, each with a (t_min, t_max) range and one face to ignore (rays leaving a surface).
+- Tests: analytic single triangle (t, barycentrics, miss, parallel, range, ignore); 7,000 random rays vs brute force
+  on an icosphere, a torus and a 3,000-triangle random soup (same hit/miss, same t to 1e-12, occlusion consistent);
+  rays from inside a closed sphere always hit within (0.99, 1]. 4 mutants (no t_max shrink, lone right child dropped,
+  wrong barycentric bound, leaf skips its last triangle) killed.
+- Process fix: the mutation harness could test a stale binary when a restore and the next edit fell in the same
+  second as the previous build (make compares mtimes). Now every mutant and restore is followed by a 1 s pause and a
+  touch; all 11 mutants of D85/D87/D89 were re-run that way and are all killed.
