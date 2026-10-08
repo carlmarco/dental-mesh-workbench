@@ -718,3 +718,21 @@ Each entry: the choice, the alternatives considered, and the reason.
 - Fake regions are where the cut gained most over Voronoi: 10.8% -> 4.0% of predicted samples.
 - Implication: the next F1 gain needs per-tooth knowledge (which papilla belongs between which two teeth), i.e.
   instance-level evidence from a learned model; tuning the cut will not recover papillae.
+
+## D83. Interdental misses are not missing creases (validation, 120 scans)
+- Measured kappa_min along every TRUE boundary edge (at the edge, and the strongest value within the one-rings of
+  its endpoints), split interdental (gingiva side within 1.5 mm of two different teeth) vs cheek/tongue side,
+  and matched vs missed by the graph cut; flat-gingiva baseline -0.24 /mm (21.7% of vertices below -1).
+  Ring medians: cheek/tongue matched -4.49, missed -4.00; interdental matched -5.22, **missed -6.15** (q25 -8.52;
+  98.9% below -1). The missed interdental boundary sits on the STRONGEST creases of the arch.
+- Predicted boundary: only 2,621 predicted interdental edges lie > 1 mm from the true line, against 52,410 missed
+  true interdental edges. The cut does not trace a competing crease elsewhere; it encloses the papilla in tooth and
+  its boundary simply disappears (a narrow papilla keeps any replacement segment within 1 mm, so precision is
+  unaffected). The competing-crease hypothesis (a shorter concave path between the crowns) is not supported.
+- So the hypothesis "the scanner cannot see between the teeth, so there is no crease" (D82) is wrong too. The
+  information is in the geometry. Working hypothesis for the mechanism (unverified): the tooth label enters the
+  papilla where its two side creases converge at the tip, beneath the contact point, a crease gap like D77, and
+  the arrival-distance unary then favours tooth over the whole wedge. Next: inspect the worst cases visually,
+  then design (per-tooth labels, or a term that forbids entering a region enclosed by strong creases).
+- Tooling: the interdental test first used per-tooth nearest-point queries, whose search expands across the
+  arch for distant points; the run was stopped after 30 min. Replaced by a fixed-radius grid lookup (3 min).

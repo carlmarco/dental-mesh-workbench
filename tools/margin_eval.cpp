@@ -11,6 +11,7 @@
 // Each <name>.obj needs its <name>.json (labels: FDI per vertex, 0 = gingiva). Per-scan inputs are
 // computed once and reused across configurations; test mode re-checks the library path (detect_margin).
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -266,6 +267,12 @@ struct ErrorStats {
     // Far recall misses: is the true-gingiva vertex beside them labelled tooth (over-extension), and does it lie
     // within 1.5 mm of two different teeth (interdental papilla)?
     std::size_t r_far_overext = 0, r_far_interdental = 0, r_far_overext_interdental = 0;
+    // D83: crease strength along the TRUE boundary. kappa_min at each true boundary edge (mean of endpoints) and
+    // the strongest crease within the one-rings of its endpoints, split interdental / other and matched / missed
+    // by the cut; plus all true-gingiva arch vertices as a flat baseline.
+    std::vector<double> k_edge[2][2], k_ring[2][2];  // [interdental][missed]
+    std::vector<double> k_gingiva;
+    std::vector<double> kp_ring[2][2];  // PREDICTED boundary edges: [interdental][> 1 mm from the true line]
     // Precision misses (predicted samples > 0.5 mm from the true line), by the predicted-tooth vertex beside them:
     std::size_t pr_samples = 0, p_fake = 0, p_near = 0, p_far = 0;  // fake: that vertex is gingiva > 0.5 mm from any tooth
 };
@@ -330,6 +337,59 @@ void error_breakdown(const HalfEdgeMesh& m, const MarginInputs& in, std::span<co
             }
             g_errors.r_far_overext += over, g_errors.r_far_interdental += two, g_errors.r_far_overext_interdental += over && two;
         }
+    }
+    // --- D83 crease measurement along the true boundary.
+    {
+        // Distinct teeth within 1.5 mm of each true-gingiva-side vertex: fixed-radius lookup on a 1.5 mm grid
+        // (27 cells), O(n). (A per-tooth nearest-point query expands its search across the arch: too slow.)
+        constexpr double kR = 1.5;
+        using Key = std::array<std::int64_t, 3>;
+        auto key = [](const Vec3& p) {
+            return Key{static_cast<std::int64_t>(std::floor(p.x / kR)), static_cast<std::int64_t>(std::floor(p.y / kR)),
+                       static_cast<std::int64_t>(std::floor(p.z / kR))};
+        };
+        std::map<Key, std::vector<std::uint32_t>> grid;
+        for (std::uint32_t v = 0; v < fdi.size(); ++v)
+            if (fdi[v] != 0) grid[key(m.positions[v])].push_back(v);
+        auto teeth_near = [&](const Vec3& g) {  // 0, 1 or 2 (= at least two distinct teeth within 1.5 mm)
+            const Key c = key(g);
+            int first = 0, n = 0;
+            for (std::int64_t dx = -1; dx <= 1 && n < 2; ++dx)
+                for (std::int64_t dy = -1; dy <= 1 && n < 2; ++dy)
+                    for (std::int64_t dz = -1; dz <= 1 && n < 2; ++dz) {
+                        const auto it = grid.find({c[0] + dx, c[1] + dy, c[2] + dz});
+                        if (it == grid.end()) continue;
+                        for (std::uint32_t v : it->second) {
+                            const Vec3 d{m.positions[v].x - g.x, m.positions[v].y - g.y, m.positions[v].z - g.z};
+                            if (d.x * d.x + d.y * d.y + d.z * d.z > kR * kR || fdi[v] == first) continue;
+                            if (first == 0) first = fdi[v], n = 1;
+                            else { n = 2; break; }
+                        }
+                    }
+            return n;
+        };
+        auto ring_min = [&](std::uint32_t a, std::uint32_t b) {
+            double r = std::min(in.kmin[a], in.kmin[b]);
+            for (std::uint32_t w : one_ring(m, a)) r = std::min(r, in.kmin[w]);
+            for (std::uint32_t w : one_ring(m, b)) r = std::min(r, in.kmin[w]);
+            return r;
+        };
+        std::vector<int> near_teeth(gt_edges.size(), 0);
+        for (std::size_t k = 0; k < gt_edges.size(); ++k)
+            near_teeth[k] = teeth_near(m.positions[truth[gt_edges[k].v0] ? gt_edges[k].v1 : gt_edges[k].v0]);
+        for (std::size_t k = 0; k < pr_edges.size(); ++k) {
+            const int inter = teeth_near(pr_pts[k]) >= 2, far = pr_to_gt[k] > 1.0;
+            g_errors.kp_ring[inter][far].push_back(ring_min(pr_edges[k].v0, pr_edges[k].v1));
+        }
+        for (std::size_t k = 0; k < gt_edges.size(); ++k) {
+            const std::uint32_t a = gt_edges[k].v0, b = gt_edges[k].v1;
+            const double ring = ring_min(a, b);
+            const int inter = near_teeth[k] >= 2, miss = gt_to_pr[k] > 0.5;
+            g_errors.k_edge[inter][miss].push_back(0.5 * (in.kmin[a] + in.kmin[b]));
+            g_errors.k_ring[inter][miss].push_back(ring);
+        }
+        for (std::size_t v = 0; v < truth.size(); v += 7)  // subsample: baseline only
+            if (in.arch[v] && !truth[v]) g_errors.k_gingiva.push_back(in.kmin[v]);
     }
     // Distance from each predicted-tooth-side vertex to the nearest true tooth vertex (fake-region test).
     std::vector<Vec3> side;
@@ -516,6 +576,31 @@ int main(int argc, char** argv) {
         std::printf("    of the > 1 mm recall misses: gingiva side labelled tooth (over-extension) %.1f%%, interdental (two teeth"
                     " within 1.5 mm) %.1f%%, both %.1f%%\n", 100.0 * double(e.r_far_overext) / double(e.r_far),
                     100.0 * double(e.r_far_interdental) / double(e.r_far), 100.0 * double(e.r_far_overext_interdental) / double(e.r_far));
+        auto q = [](std::vector<double> v, double f) {
+            if (v.empty()) return 0.0;
+            std::sort(v.begin(), v.end());
+            return v[static_cast<std::size_t>(f * double(v.size() - 1))];
+        };
+        auto frac_below = [](const std::vector<double>& v, double t) {
+            std::size_t n = 0;
+            for (double x : v) n += x < t;
+            return v.empty() ? 0.0 : double(n) / double(v.size());
+        };
+        std::printf("\ncrease strength along the TRUE boundary (kappa_min, 1/mm; more negative = stronger crease):\n");
+        std::printf("  %-34s %8s %10s %10s %12s %14s\n", "", "edges", "edge med", "ring med", "ring q25", "ring < -1 /mm");
+        const char* names[2][2] = {{"cheek/tongue side, matched", "cheek/tongue side, missed"}, {"interdental, matched", "interdental, missed"}};
+        for (int i = 0; i < 2; ++i)
+            for (int j = 0; j < 2; ++j)
+                std::printf("  %-34s %8zu %10.2f %10.2f %12.2f %13.1f%%\n", names[i][j], e.k_edge[i][j].size(), q(e.k_edge[i][j], 0.5),
+                            q(e.k_ring[i][j], 0.5), q(e.k_ring[i][j], 0.25), 100.0 * frac_below(e.k_ring[i][j], -1.0));
+        std::printf("  %-34s %8zu %10.2f %10s %12s %13.1f%%\n", "baseline: true gingiva vertices", e.k_gingiva.size(), q(e.k_gingiva, 0.5),
+                    "-", "-", 100.0 * frac_below(e.k_gingiva, -1.0));
+        std::printf("  PREDICTED boundary (ring min kappa_min):\n");
+        const char* pnames[2][2] = {{"cheek/tongue side, within 1 mm", "cheek/tongue side, > 1 mm off"}, {"interdental, within 1 mm", "interdental, > 1 mm off"}};
+        for (int i = 0; i < 2; ++i)
+            for (int j = 0; j < 2; ++j)
+                std::printf("  %-34s %8zu %10s %10.2f %12.2f %13.1f%%\n", pnames[i][j], e.kp_ring[i][j].size(), "-",
+                            q(e.kp_ring[i][j], 0.5), q(e.kp_ring[i][j], 0.25), 100.0 * frac_below(e.kp_ring[i][j], -1.0));
         std::printf("  precision misses (%.1f%% of predicted samples): fake regions on gingiva %.1f%%, 0.5-1 mm off %.1f%%,"
                     " > 1 mm off (not fake) %.1f%%\n", 100 * p_miss / pg, 100 * e.p_fake / pg, 100 * e.p_near / pg, 100 * e.p_far / pg);
     }
