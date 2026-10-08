@@ -14,8 +14,32 @@ double potts_energy(std::uint32_t labels, std::span<const double> unary, std::sp
     return e;
 }
 
+bool star_feasible(const StarParents& star_parent, std::span<const std::uint32_t> f) {
+    for (std::size_t i = 0; i < f.size(); ++i) {
+        if (f[i] >= star_parent.size() || star_parent[f[i]].empty()) continue;
+        const std::uint32_t p = star_parent[f[i]][i];
+        if (p == kNoParent || (p != i && f[p] != f[i])) return false;
+    }
+    return true;
+}
+
+void star_repair(const StarParents& star_parent, std::span<const std::uint32_t> order, std::uint32_t fallback,
+                 std::vector<std::uint32_t>& f) {
+    for (std::uint32_t i : order) {
+        const std::uint32_t l = f[i];
+        if (l >= star_parent.size() || star_parent[l].empty()) continue;
+        const std::uint32_t p = star_parent[l][i];
+        if (p == kNoParent || (p != i && f[p] != l)) f[i] = fallback;  // parents come first, so cascades resolve
+    }
+}
+
 double alpha_expansion(std::uint32_t labels, std::span<const double> unary, std::span<const PottsEdge> edges,
-                       std::vector<std::uint32_t>& f, int max_sweeps, const ExpansionCandidates& candidates) {
+                       std::vector<std::uint32_t>& f, int max_sweeps, const ExpansionCandidates& candidates,
+                       const StarParents& star_parent) {
+    constexpr double kInf = 1e15;  // finite stand-in for an infinite capacity (max-flow needs finite values)
+    auto parents_of = [&](std::uint32_t l) -> const std::vector<std::uint32_t>* {
+        return l < star_parent.size() && !star_parent[l].empty() ? &star_parent[l] : nullptr;
+    };
     const auto n = static_cast<std::uint32_t>(f.size());
     constexpr std::uint32_t kOut = 0xFFFFFFFFu;
     std::vector<std::uint8_t> mask(n, 1);
@@ -56,6 +80,29 @@ double alpha_expansion(std::uint32_t labels, std::span<const double> unary, std:
                 } else {
                     cost1[ib] += B - A;  // x_a = 0: E = A + (B - A) x_b
                 }
+            }
+            // Star constraints (D87). (1) Taking alpha: node i may switch only if its alpha-parent ends up alpha.
+            if (const auto* pa = parents_of(alpha)) {
+                for (std::uint32_t i = 0; i < n; ++i) {
+                    if (local[i] == kOut) continue;
+                    const std::uint32_t p = (*pa)[i];
+                    if (p == i) continue;                                          // a root
+                    if (p == kNoParent) { cost1[local[i]] += kInf; continue; }     // may not take alpha
+                    if (f[p] == alpha) continue;                                   // parent already alpha (stays)
+                    if (local[p] == kOut) { cost1[local[i]] += kInf; continue; }   // parent cannot become alpha
+                    move.add_edge(local[p], local[i], kInf, 0.0);                  // cut iff p keeps and i takes alpha
+                }
+            }
+            // (2) Keeping l: a node that keeps label l forbids its l-parent from switching to alpha.
+            for (std::uint32_t i = 0; i < n; ++i) {
+                const std::uint32_t l = f[i];
+                if (l == alpha) continue;
+                const auto* pl = parents_of(l);
+                if (!pl) continue;
+                const std::uint32_t p = (*pl)[i];
+                if (p == i || p == kNoParent || local[p] == kOut) continue;        // root, or the parent cannot move
+                if (local[i] == kOut) cost1[local[p]] += kInf;                     // i is fixed: p may not switch
+                else move.add_edge(local[i], local[p], kInf, 0.0);                 // cut iff i keeps and p switches
             }
             for (std::uint32_t i = 0; i < m; ++i) {
                 const double lo = std::min(cost0[i], cost1[i]);

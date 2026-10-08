@@ -52,6 +52,10 @@ struct MarginParams {
     double strip_kmin = -1e300;      // PerToothCut: carve tooth|tooth boundary vertices with kappa_min below this (off:
                                      // every carving variant was worse on the sweep scans, D85)
     int expansion_sweeps = 3;        // PerToothCut: alpha-expansion sweeps over all labels (stops early if stable)
+    bool star_plain = false;         // PerToothCut star prior: trees from plain edge lengths ("straight rays") instead of
+                                     // the crease-weighted distances of the unary
+    bool star_prior = false;         // PerToothCut: each tooth region star-shaped along its shortest-path tree from its
+                                     // seed tips (geodesic star convexity, Gulshan et al. 2010; D87)
     double label_radius = 15.0;      // PerToothCut: each per-label Dijkstra only visits vertices within this straight-line
                                      // distance of that label's seed tips (mm; 0 = whole arch; D86 speed)
     double expansion_radius = 3.0;   // PerToothCut: a move to label l only considers vertices within ~this (mm, grid

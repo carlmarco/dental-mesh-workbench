@@ -270,12 +270,17 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     // which seed label each vertex was reached from (first arrival).
     // `within(w)`: an optional spatial limit on which vertices the search may visit (PerToothCut, D86).
     auto arrival = [&](auto is_source, std::vector<double>& dist, std::vector<std::uint8_t>* owner,
-                       const std::function<bool(std::uint32_t)>& within = {}) {
+                       const std::function<bool(std::uint32_t)>& within = {}, std::vector<std::uint32_t>* parent = nullptr,
+                       bool plain = false) {
         dist.assign(nv, std::numeric_limits<double>::infinity());
+        if (parent) parent->assign(nv, kInvalid);
         using Item = std::pair<double, std::uint32_t>;
         std::priority_queue<Item, std::vector<Item>, std::greater<>> heap;
         for (std::uint32_t v = 0; v < nv; ++v) {
-            if (is_source(label[v])) dist[v] = 0.0, heap.push({0.0, v});
+            if (is_source(label[v])) {
+                dist[v] = 0.0, heap.push({0.0, v});
+                if (parent) (*parent)[v] = v;
+            }
         }
         while (!heap.empty()) {
             const auto [d, v] = heap.top();
@@ -283,10 +288,11 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
             if (d > dist[v]) continue;
             for (std::uint32_t w : one_ring(m, v)) {
                 if (!in.arch[w] || (within && !within(w))) continue;
-                const double nd = d + edge_cost(v, w);
+                const double nd = d + (plain ? norm(m.positions[w] - m.positions[v]) : edge_cost(v, w));
                 if (nd < dist[w]) {
                     dist[w] = nd;
                     if (owner) (*owner)[w] = (*owner)[v];
+                    if (parent) (*parent)[w] = v;
                     heap.push({nd, w});
                 }
             }
@@ -378,6 +384,7 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     if (groups < 2) return tooth;  // nothing to separate
     const auto labels = static_cast<std::size_t>(groups) + 1;  // 0 = gingiva, 1..groups = teeth
     std::vector<std::vector<double>> dist(labels);
+    std::vector<std::vector<std::uint32_t>> tree(labels);  // per-label shortest-path parents (vertex ids; star prior)
     dist[0] = dg;
     std::vector<int> fixed(nv, -1);  // hard constraints
     for (std::uint32_t v = 0; v < nv; ++v)
@@ -402,7 +409,12 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
                 return false;
             };
         }
-        arrival([](std::uint8_t x) { return x == 1; }, dist[static_cast<std::size_t>(l)], nullptr, near_seeds);
+        arrival([](std::uint8_t x) { return x == 1; }, dist[static_cast<std::size_t>(l)], nullptr, near_seeds,
+                p.star_prior && !p.star_plain ? &tree[static_cast<std::size_t>(l)] : nullptr);
+        if (p.star_prior && p.star_plain) {  // straight-ray trees: a separate search over plain edge lengths
+            std::vector<double> plain_dist;
+            arrival([](std::uint8_t x) { return x == 1; }, plain_dist, nullptr, near_seeds, &tree[static_cast<std::size_t>(l)], true);
+        }
         label = std::move(keep);
     }
     lap(&MarginTimings::label_dijkstra);
@@ -491,7 +503,27 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
             for (std::uint32_t i = 0; i < count; ++i) mask[i] = near[cell[i]];
         };
     }
-    alpha_expansion(static_cast<std::uint32_t>(labels), unary, pairs, f, p.expansion_sweeps, near_label);
+    StarParents star;
+    if (p.star_prior) {
+        // Node-indexed trees for the tooth labels (gingiva unconstrained); unreached nodes may not take the label.
+        star.resize(labels);
+        for (std::size_t l = 1; l < labels; ++l) {
+            star[l].assign(count, kNoParent);
+            for (std::uint32_t v = 0; v < nv; ++v) {
+                if (!in.arch[v] || tree[l][v] == kInvalid) continue;
+                star[l][node[v]] = node[tree[l][v]];
+            }
+        }
+        // Repair the initial labelling: process nodes by distance in their own label's tree (parents first).
+        std::vector<std::uint32_t> order(count), vertex_of(count);
+        for (std::uint32_t v = 0; v < nv; ++v)
+            if (in.arch[v]) vertex_of[node[v]] = v;
+        for (std::uint32_t i = 0; i < count; ++i) order[i] = i;
+        auto key = [&](std::uint32_t i) { return f[i] == 0 ? 0.0 : dist[f[i]][vertex_of[i]]; };
+        std::sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) { return key(a) < key(b); });
+        for (int pass = 0; pass < 4 && !star_feasible(star, f); ++pass) star_repair(star, order, 0, f);
+    }
+    alpha_expansion(static_cast<std::uint32_t>(labels), unary, pairs, f, p.expansion_sweeps, near_label, star);
     lap(&MarginTimings::expansion);
     for (std::uint32_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && f[node[v]] != 0) ? 1 : 0;
     // Interdental strip: at tooth|tooth edges along a valley, the deeper vertex becomes gingiva.

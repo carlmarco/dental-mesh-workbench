@@ -104,3 +104,45 @@ TEST_CASE("multilabel: an all-true candidate filter gives the same result; a res
         for (std::size_t i = 1; i < n; i += 2) CHECK(c[i] == init[i]);
     }
 }
+
+TEST_CASE("multilabel: star constraints hold throughout, and the result is a local minimum over feasible expansion moves", "[multilabel]") {
+    // Each non-zero label gets a random tree over the nodes (a random root, parents chosen among earlier nodes in a
+    // random order, some nodes forbidden). Label 0 is unconstrained (the fallback).
+    std::mt19937 rng(31);
+    for (int trial = 0; trial < 300; ++trial) {
+        const std::uint32_t n = 3 + static_cast<std::uint32_t>(trial % 5), labels = 2 + static_cast<std::uint32_t>(trial % 3);
+        const Problem p = random_problem(rng, n, labels);
+        StarParents star(labels);
+        std::vector<std::uint32_t> order(n);
+        for (std::uint32_t i = 0; i < n; ++i) order[i] = i;
+        std::shuffle(order.begin(), order.end(), rng);  // one global order: parents always earlier (valid for repair)
+        for (std::uint32_t l = 1; l < labels; ++l) {
+            star[l].assign(n, kNoParent);
+            for (std::size_t k = 0; k < n; ++k) {
+                const std::uint32_t i = order[k];
+                if (k == 0) star[l][i] = i;  // root
+                else if (std::uniform_int_distribution<int>(0, 5)(rng) == 0) star[l][i] = kNoParent;
+                else star[l][i] = order[std::uniform_int_distribution<std::size_t>(0, k - 1)(rng)];
+            }
+        }
+        std::vector<std::uint32_t> f(n);
+        for (auto& x : f) x = std::uniform_int_distribution<std::uint32_t>(0, labels - 1)(rng);
+        star_repair(star, order, 0, f);
+        INFO("trial " << trial);
+        REQUIRE(star_feasible(star, f));
+        const double e0 = potts_energy(labels, p.unary, p.edges, f);
+        const double e = alpha_expansion(labels, p.unary, p.edges, f, 50, {}, star);
+        CHECK(star_feasible(star, f));
+        CHECK(e <= e0 + 1e-9);
+        // No feasible single expansion move improves the result (exhaustive over move subsets).
+        for (std::uint32_t alpha = 0; alpha < labels; ++alpha) {
+            for (std::uint32_t mask = 0; mask < (1u << n); ++mask) {
+                std::vector<std::uint32_t> g = f;
+                for (std::uint32_t i = 0; i < n; ++i)
+                    if ((mask >> i) & 1u) g[i] = alpha;
+                if (!star_feasible(star, g)) continue;
+                CHECK(potts_energy(labels, p.unary, p.edges, g) >= e - 1e-9);
+            }
+        }
+    }
+}

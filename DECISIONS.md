@@ -805,3 +805,21 @@ Each entry: the choice, the alternatives considered, and the reason.
   binary cut -0.049, t = -3.1, better on 55 (unchanged). The radius changes results by ~0.002 mm on average.
 - Net: labelling ~2.6x faster in like-for-like runs (~1.7 s -> ~0.65 s on the 12-scan slice); absolute timings in
   this session vary +-40% with machine load (a VM was using ~3 cores), so only same-run ratios are quoted.
+
+## D87. Geodesic star-convexity prior: implemented, verified, no effect; not adopted
+- Idea (D86 write-up): fake tooth regions attached to crowns (2.3% + 3.4% of predicted boundary) should violate a
+  shape prior. Star convexity (Veksler, ECCV 2008), geodesic version (Gulshan et al., CVPR 2010): each tooth label
+  gets a shortest-path tree from its seed tips; a vertex labelled l needs its parent labelled l.
+- core/multilabel: optional star constraints in alpha_expansion. Both directions are infinite pairwise terms that
+  are submodular in every move (taking alpha needs the alpha-parent to be alpha: arc parent -> node; keeping l
+  forbids the l-parent from switching: arc node -> parent), so moves stay exact. star_repair makes an initial
+  labelling feasible (parents first; violators fall back to an unconstrained label). Test vs brute force: feasible
+  throughout, energy never rises, no feasible expansion move improves the result; 3 mutants (either arc dropped,
+  forbidden nodes ignored) killed.
+- PerToothCut: trees from the crease-weighted per-label Dijkstra (star_prior), or from plain edge lengths ("straight
+  rays", star_plain). 12-scan slice: weighted -0.001 mm (t -1.0); plain +0.023 (2 scans worse by > 0.1 mm), too
+  restrictive for real crowns. 60 sweep scans, weighted: 0.274 -> 0.275 mm, t = +0.4, better 32 / worse 27, at
+  ~1.6x the labelling time. **Not adopted** (off by default).
+- Why weighted trees change nothing: a region attached through a crease gap is reached by shortest paths through
+  that same gap, so it is star-shaped in that metric; the remaining fake regions are mostly around false seeds,
+  which are their own centres. The prior constrains shape, not seed correctness.

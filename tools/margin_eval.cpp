@@ -48,9 +48,9 @@ struct Config {
             std::snprintf(b, sizeof b, "GraphCut mu=%.2f beta=%.0f alpha=%.0f tq=%.2f islands<%.0f%s", p.cut_smoothness, p.cut_crease,
                           p.valley_weight, p.tooth_quantile, p.min_tooth_region, p.seed_model ? " + classifier" : "");
         else if (p.method == Method::PerToothCut)
-            std::snprintf(b, sizeof b, "PerToothCut tau=%s strip<%s R=%.0f label_r=%.0f%s", p.group_crease >= 1e8 ? "none" : std::to_string(p.group_crease).substr(0, 5).c_str(),
+            std::snprintf(b, sizeof b, "PerToothCut tau=%s strip<%s R=%.0f label_r=%.0f%s%s", p.group_crease >= 1e8 ? "none" : std::to_string(p.group_crease).substr(0, 5).c_str(),
                           p.strip_kmin < -1e8 ? "off" : std::to_string(p.strip_kmin).substr(0, 4).c_str(), p.expansion_radius,
-                          p.label_radius, p.seed_model ? " + classifier" : "");
+                          p.label_radius, p.star_prior ? (p.star_plain ? " star(plain)" : " star") : "", p.seed_model ? " + classifier" : "");
         else if (p.cusp_seed_quantile == kHeightOracle) std::snprintf(b, sizeof b, "ORACLE: height seeds on true gingiva removed (+clf)");
         else if (p.cusp_seed_quantile == kBothOracles) std::snprintf(b, sizeof b, "ORACLE: all tooth seeds on true gingiva removed");
         else if (p.cusp_seed_quantile < 0.0) std::snprintf(b, sizeof b, "ORACLE: cusp seeds on true gingiva removed");
@@ -143,6 +143,16 @@ std::vector<Config> validate_configs() {
     }
     if (g_experiment == "errors") {
         c.push_back({graph_cut(false)});  // D80: where does the per-vertex error of the public method sit?
+        return c;
+    }
+    if (g_experiment == "star") {  // D87: geodesic star-convexity prior on the per-tooth cut (sweep scans)
+        MarginParams p = graph_cut(false);
+        p.method = Method::PerToothCut, p.group_crease = -1.25;
+        MarginParams st = p;
+        st.star_prior = true;
+        // 12-scan slice: weighted trees -0.001 mm (t -1.0); straight-ray trees +0.023 (2 scans worse by > 0.1 mm).
+        c.push_back({p});
+        c.push_back({st});
         return c;
     }
     if (g_experiment == "speed_check") {  // D86: the faster per-tooth cut must reproduce sweep 3 (tau -1.25: 0.272)
