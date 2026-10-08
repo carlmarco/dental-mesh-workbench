@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "core/curvature.h"
 #include "core/dec.h"
 #include "core/generate.h"
 #include "core/margin.h"
@@ -184,4 +185,86 @@ TEST_CASE("margin: a false tooth seed on flat gingiva floods a Voronoi region; t
     CHECK(ac[0] < av);
     CHECK(std::is_sorted(ac.rbegin(), ac.rend()));  // monotone in mu
     CHECK(ac[3] < 0.05 * av);                       // a speck around the hard seed
+}
+
+TEST_CASE("margin: cusp grouping splits crowns at the valley between them, keeps one crown's tips together", "[margin]") {
+    // Two smooth domes side by side (z = max of the two): where they meet, the surface has a concave
+    // valley (the max of two functions creases downward). Tips: each dome's apex, plus a second tip on dome A.
+    auto m = make_grid(120, 60);
+    auto dome = [](double x, double y, double cx) {
+        const double r2 = (x - cx) * (x - cx) + y * y;
+        return std::max(0.0, 4.0 - r2) / 4.0 * 3.0;  // radius 2 mm, height 3 mm
+    };
+    for (auto& p : m.positions) {
+        p.x = 12.0 * p.x - 6.0, p.y = 6.0 * p.y - 3.0;
+        p.z = std::max(dome(p.x, p.y, -1.6), dome(p.x, p.y, 1.6));  // centres 3.2 mm apart: domes overlap
+    }
+    const auto mesh = he(m);
+    auto nearest = [&](double x, double y) {
+        std::uint32_t best = 0;
+        for (std::uint32_t v = 0; v < mesh.positions.size(); ++v)
+            if (std::hypot(mesh.positions[v].x - x, mesh.positions[v].y - y) <
+                std::hypot(mesh.positions[best].x - x, mesh.positions[best].y - y))
+                best = v;
+        return best;
+    };
+    const std::vector<std::uint32_t> tips{nearest(-1.6, 0.0), nearest(-1.2, 0.5), nearest(1.6, 0.0)};
+    std::vector<std::uint8_t> region(mesh.positions.size(), 0);
+    for (std::size_t v = 0; v < region.size(); ++v) region[v] = mesh.positions[v].z > 0.05;  // the domes
+    std::vector<double> kmin(mesh.positions.size());
+    const auto curv = compute_curvature(mesh);
+    for (std::size_t v = 0; v < kmin.size(); ++v) kmin[v] = std::isfinite(curv.k2[v]) ? curv.k2[v] : 0.0;
+    const auto g = group_cusps(mesh, tips, region, kmin, -2.0);
+    REQUIRE(g.size() == 3);
+    CHECK(g[0] >= 0);
+    CHECK(g[0] == g[1]);  // same dome
+    CHECK(g[0] != g[2]);  // across the valley
+    // A threshold below the valley's concavity merges everything.
+    const auto merged = group_cusps(mesh, tips, region, kmin, -1e9);
+    CHECK((merged[0] == merged[1] && merged[1] == merged[2]));
+}
+
+TEST_CASE("margin: per-tooth cut with strip carving keeps gingiva between two touching crowns; the binary cut merges them", "[margin]") {
+    // Two domes on a flat gingiva plane, overlapping slightly: where they meet, a valley runs up between
+    // them (D84). Both crowns are "tooth" to a binary labelling, so it needs no boundary there.
+    auto m = make_grid(120, 80);
+    auto dome = [](double x, double y, double cx) {
+        const double r2 = (x - cx) * (x - cx) + y * y;
+        return std::max(0.0, 4.0 - r2) / 4.0 * 3.0;
+    };
+    for (auto& p : m.positions) {
+        p.x = 12.0 * p.x - 6.0, p.y = 8.0 * p.y - 4.0;
+        p.z = std::max(dome(p.x, p.y, -1.8), dome(p.x, p.y, 1.8));
+    }
+    const auto mesh = he(m);
+    auto nearest = [&](double x, double y) {
+        std::uint32_t best = 0;
+        for (std::uint32_t v = 0; v < mesh.positions.size(); ++v)
+            if (std::hypot(mesh.positions[v].x - x, mesh.positions[v].y - y) <
+                std::hypot(mesh.positions[best].x - x, mesh.positions[best].y - y))
+                best = v;
+        return best;
+    };
+    MarginInputs in = margin_inputs(mesh, false);
+    in.cusp_tips = {nearest(-1.8, 0.0), nearest(1.8, 0.0)};
+    MarginParams binary = margin_operating_point();
+    binary.gingiva_quantile = 0.0;  // gingiva seeds: the patch border (as on a real arch)
+    MarginParams per_tooth = binary;
+    per_tooth.method = MarginParams::Method::PerToothCut;
+    per_tooth.strip_kmin = 0.0;  // the carving mechanism (off at the operating point, D85)
+    const auto valley = valley_strength(build_dec(mesh), in.kmin, binary.curvature_scale);
+    const auto a = margin_labels(mesh, in, valley, binary), b = margin_labels(mesh, in, valley, per_tooth);
+    // Gingiva vertices high up in the valley between the crowns (|x| < 0.3 mm, z > 0.5 mm).
+    auto strip = [&](const std::vector<std::uint8_t>& t) {
+        std::size_t n = 0;
+        for (std::size_t v = 0; v < t.size(); ++v)
+            n += !t[v] && std::abs(mesh.positions[v].x) < 0.3 && mesh.positions[v].z > 0.5;
+        return n;
+    };
+    CHECK(strip(a) == 0);  // binary: the crowns merge, no boundary between them
+    CHECK(strip(b) > 0);   // per tooth: a strip of gingiva separates them
+    // Elsewhere the two agree: the strip is thin.
+    std::size_t differ = 0, crowns = 0;
+    for (std::size_t v = 0; v < a.size(); ++v) differ += a[v] != b[v], crowns += a[v];
+    CHECK(differ < crowns / 20);
 }

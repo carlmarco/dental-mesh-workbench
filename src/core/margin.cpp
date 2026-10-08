@@ -13,6 +13,7 @@
 #include "core/dec.h"
 #include "core/cusps.h"
 #include "core/maxflow.h"
+#include "core/multilabel.h"
 #include "detail/hash.h"
 #include "detail/vec.h"
 
@@ -233,6 +234,7 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     for (std::uint32_t v = 0; v < nv; ++v) {
         if (label[v] == 1 && vetoed(v)) label[v] = 2;  // oracle: height seed on true gingiva removed
     }
+    std::vector<std::uint32_t> seed_tips;  // cusp tips that became tooth seeds (for PerToothCut grouping)
     if (p.cusp_seeds) {
         const double seed_gate = q(p.cusp_seed_quantile);
         for (std::size_t i = 0; i < in.cusp_tips.size(); ++i) {
@@ -245,6 +247,7 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
             }
             if (vetoed(v)) continue;
             label[v] = 1;
+            seed_tips.push_back(v);
         }
     }
     const bool weighted = p.valley_weight > 0.0 && !valley.empty();
@@ -341,8 +344,154 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     }
     g.solve();
     for (std::uint32_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && g.source_side(node[v])) ? 1 : 0;
+    if (p.method != MarginParams::Method::PerToothCut) {
+        remove_small_tooth_regions(m, tooth, p.min_tooth_region);
+        return tooth;
+    }
+
+    // --- PerToothCut (D85): group the seed tips into teeth on the binary tooth region, then alpha-expansion.
+    std::vector<int> grp;
+    if (p.group_crease >= 1e8) {  // no grouping: every seed tip in the tooth region is its own label
+        for (std::uint32_t v : seed_tips) grp.push_back(tooth[v] ? static_cast<int>(grp.size()) : -1);
+        int next = 0;
+        for (int& x : grp) x = x < 0 ? -1 : next++;
+    } else {
+        grp = group_cusps(m, seed_tips, tooth, in.kmin, p.group_crease);
+    }
+    const int groups = grp.empty() ? 0 : *std::max_element(grp.begin(), grp.end()) + 1;
+    if (groups < 2) return tooth;  // nothing to separate
+    const auto labels = static_cast<std::size_t>(groups) + 1;  // 0 = gingiva, 1..groups = teeth
+    std::vector<std::vector<double>> dist(labels);
+    dist[0] = dg;
+    std::vector<int> fixed(nv, -1);  // hard constraints
+    for (std::uint32_t v = 0; v < nv; ++v)
+        if (in.arch[v] && label[v] == 0) fixed[v] = 0;
+    for (int l = 1; l <= groups; ++l) {
+        std::vector<std::uint8_t> src(nv, 0);
+        for (std::size_t i = 0; i < seed_tips.size(); ++i)
+            if (grp[i] == l - 1) src[seed_tips[i]] = 1, fixed[seed_tips[i]] = l;
+        std::vector<std::uint8_t> keep = label;
+        for (std::uint32_t v = 0; v < nv; ++v) label[v] = src[v] ? 1 : 2;
+        arrival([](std::uint8_t x) { return x == 1; }, dist[static_cast<std::size_t>(l)], nullptr);
+        label = std::move(keep);
+    }
+    // Unary D_l(v) = -A log p_l, p_l = (1/d_l) / sum_k (1/d_k); hard constraints as kHard.
+    std::vector<double> unary(static_cast<std::size_t>(count) * labels, 0.0);
+    for (std::uint32_t v = 0; v < nv; ++v) {
+        if (!in.arch[v]) continue;
+        double* u = &unary[static_cast<std::size_t>(node[v]) * labels];
+        if (fixed[v] >= 0) {
+            for (std::size_t l = 0; l < labels; ++l) u[l] = static_cast<int>(l) == fixed[v] ? 0.0 : kHard;
+            continue;
+        }
+        double total = 0.0;
+        std::vector<double> inv(labels);
+        for (std::size_t l = 0; l < labels; ++l) {
+            const double d = dist[l][v];
+            inv[l] = std::isfinite(d) ? 1.0 / std::max(d, 1e-12) : 0.0;
+            total += inv[l];
+        }
+        for (std::size_t l = 0; l < labels; ++l) u[l] = -area[v] * std::log(std::max(total > 0.0 ? inv[l] / total : 0.0, kEps));
+    }
+    // Pairwise Potts weights (same as the binary cut).
+    std::vector<PottsEdge> pairs;
+    if (p.cut_smoothness > 0.0) {
+        for (std::uint32_t h = 0; h < m.origin.size(); ++h) {
+            const std::uint32_t t = m.twin[h];
+            if (t == kInvalid || t < h) continue;
+            const std::uint32_t a = m.origin[h], b = dest(m, h);
+            if (!in.arch[a] || !in.arch[b]) continue;
+            const double len = std::max(0.0, dual[h] + dual[t]);
+            const double crease = valley.empty() ? 0.0 : 0.5 * (valley[a] + valley[b]);
+            const double w = p.cut_smoothness * len / (1.0 + p.cut_crease * crease);
+            if (w > 0.0) pairs.push_back({node[a], node[b], w});
+        }
+    }
+    // Initial labelling: gingiva where the binary cut said gingiva, else the most likely tooth label.
+    std::vector<std::uint32_t> f(count, 0);
+    for (std::uint32_t v = 0; v < nv; ++v) {
+        if (!in.arch[v]) continue;
+        const double* u = &unary[static_cast<std::size_t>(node[v]) * labels];
+        std::size_t best = 0;
+        if (tooth[v])
+            for (std::size_t l = 1; l < labels; ++l)
+                if (best == 0 || u[l] < u[best]) best = l;
+        if (fixed[v] >= 0) best = static_cast<std::size_t>(fixed[v]);
+        f[node[v]] = static_cast<std::uint32_t>(best);
+    }
+    ExpansionCandidates near_label;
+    if (p.expansion_radius > 0.0) {
+        // Grid cells of size R: a vertex may take label l if a cell within one step holds a vertex labelled l.
+        std::vector<std::uint32_t> vertex_of(count);
+        for (std::uint32_t v = 0; v < nv; ++v)
+            if (in.arch[v]) vertex_of[node[v]] = v;
+        const double r = p.expansion_radius;
+        using Key = std::array<std::int64_t, 3>;
+        std::vector<Key> cell(count);
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const Vec3& x = m.positions[vertex_of[i]];
+            cell[i] = {static_cast<std::int64_t>(std::floor(x.x / r)), static_cast<std::int64_t>(std::floor(x.y / r)),
+                       static_cast<std::int64_t>(std::floor(x.z / r))};
+        }
+        near_label = [cell, count](std::uint32_t alpha, const std::vector<std::uint32_t>& lab, std::vector<std::uint8_t>& mask) {
+            std::unordered_map<Key, char, Hash3<std::int64_t>> occupied;
+            for (std::uint32_t i = 0; i < count; ++i)
+                if (lab[i] == alpha) occupied.emplace(cell[i], 1);
+            for (std::uint32_t i = 0; i < count; ++i) {
+                bool hit = false;
+                for (std::int64_t dx = -1; dx <= 1 && !hit; ++dx)
+                    for (std::int64_t dy = -1; dy <= 1 && !hit; ++dy)
+                        for (std::int64_t dz = -1; dz <= 1 && !hit; ++dz)
+                            hit = occupied.count({cell[i][0] + dx, cell[i][1] + dy, cell[i][2] + dz}) != 0;
+                mask[i] = hit ? 1 : 0;
+            }
+        };
+    }
+    alpha_expansion(static_cast<std::uint32_t>(labels), unary, pairs, f, p.expansion_sweeps, near_label);
+    for (std::uint32_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && f[node[v]] != 0) ? 1 : 0;
+    // Interdental strip: at tooth|tooth edges along a valley, the deeper vertex becomes gingiva.
+    std::vector<std::uint32_t> carve;
+    for (std::uint32_t h = 0; h < m.origin.size(); ++h) {
+        const std::uint32_t t = m.twin[h];
+        if (t == kInvalid || t < h) continue;
+        const std::uint32_t a = m.origin[h], b = dest(m, h);
+        if (!in.arch[a] || !in.arch[b]) continue;
+        const std::uint32_t la = f[node[a]], lb = f[node[b]];
+        if (la == 0 || lb == 0 || la == lb) continue;
+        const std::uint32_t deeper = in.kmin[a] <= in.kmin[b] ? a : b;
+        if (in.kmin[deeper] < p.strip_kmin && fixed[deeper] < 0) carve.push_back(deeper);
+    }
+    for (std::uint32_t v : carve) tooth[v] = 0;
     remove_small_tooth_regions(m, tooth, p.min_tooth_region);
     return tooth;
+}
+
+std::vector<int> group_cusps(const HalfEdgeMesh& m, std::span<const std::uint32_t> tips, std::span<const std::uint8_t> region,
+                             std::span<const double> kmin, double tau) {
+    const std::size_t nv = m.positions.size();
+    auto open = [&](std::uint32_t v) { return region[v] && kmin[v] > tau; };
+    std::vector<int> component(nv, -1);
+    std::vector<int> group(tips.size(), -1);
+    std::vector<int> group_of_component;  // component id -> group id (-1 until a tip lands in it)
+    int components = 0;
+    std::vector<std::uint32_t> queue;
+    for (std::size_t i = 0; i < tips.size(); ++i) {
+        const std::uint32_t t = tips[i];
+        if (!open(t)) continue;
+        if (component[t] < 0) {  // flood the superlevel-set component containing this tip
+            const int c = components++;
+            group_of_component.push_back(-1);
+            queue.assign(1, t);
+            component[t] = c;
+            for (std::size_t k = 0; k < queue.size(); ++k)
+                for (std::uint32_t w : one_ring(m, queue[k]))
+                    if (component[w] < 0 && open(w)) component[w] = c, queue.push_back(w);
+        }
+        int& g = group_of_component[static_cast<std::size_t>(component[t])];
+        if (g < 0) g = *std::max_element(group.begin(), group.end()) + 1;
+        group[i] = g;
+    }
+    return group;
 }
 
 MarginParams margin_operating_point() {
@@ -353,9 +502,12 @@ MarginParams margin_operating_point() {
     // GraphCut (D78): mu 1000, beta 300, the centre of the plateau of the third sweep on the 60 sweep
     // scans (ASSD 0.323 vs 0.558 for Voronoi); validation 0.518 -> 0.344 mm.
     MarginParams p;
-    p.method = MarginParams::Method::GraphCut;
     p.valley_weight = 2560.0, p.curvature_scale = 0.0, p.gingiva_quantile = 0.15, p.tooth_quantile = 1.0, p.cusp_seeds = true;
     p.cut_smoothness = 1000.0, p.cut_crease = 300.0;
+    // PerToothCut (D85): tau -1.25 (sweeps on the 60 sweep scans: 0.323 -> 0.272), no strip carving, expansion
+    // radius 3 mm (identical metrics to the full expansion, 3x faster); validation 0.344 -> 0.283 mm.
+    p.method = MarginParams::Method::PerToothCut;
+    p.group_crease = -1.25;
     return p;
 }
 

@@ -118,7 +118,8 @@ Scans are not redistributed. Only aggregate metrics are reported, with attributi
 | Naive baseline: plane cut at a height quantile | ASSD 1.663 mm, boundary F1 0.208 at 0.5 mm |
 | + learned cusp-seed filter (logistic regression; model kept local, see D76) | ASSD **0.528 mm**, tooth IoU 0.869; paired: better on 130 scans, worse on 5 of 300 |
 | + no height-band tooth seeds (D77) | ASSD 0.520 mm (median 0.409), HD95 2.95 mm; paired vs 0.551: t = −3.6, better on 178, worse on 122 of 300 |
-| **Graph cut on fresh, never-used test data (Teeth3DS part 6, 299 scans, D81)** | ASSD **0.357 mm** (median 0.271), HD95 2.37 mm, boundary F1 **0.880** at 0.5 mm, tooth IoU **0.927**; paired vs Voronoi: t = −12.5, better on 258 of 299 |
+| **Per-tooth labelling (cusp grouping + multi-label graph cut, D85; public operating point), Teeth3DS part 6, 299 scans** | ASSD **0.285 mm** (median 0.219), HD95 **1.98 mm**, boundary F1 **0.906** at 0.5 mm, tooth IoU **0.936**; paired vs the binary cut: t = −7.3, better on 265 of 299, 1 worse by > 0.1 mm |
+| Binary graph cut on part 6 (first look at fresh data, D81) | ASSD **0.357 mm** (median 0.271), HD95 2.37 mm, boundary F1 **0.880** at 0.5 mm, tooth IoU **0.927**; paired vs Voronoi: t = −12.5, better on 258 of 299 |
 | + graph-cut labelling (Boykov–Kolmogorov max-flow, D78; public operating point), part 5 | ASSD **0.338 mm** (median 0.283), HD95 **2.34 mm**, boundary F1 **0.883** at 0.5 mm, tooth IoU **0.925**; paired vs 0.520: t = −11.5, better on 247, worse on 53 (7 by > 0.1 mm) |
 | Cusp detection time, 93.6k-vertex scan | 383 ms native, 459 ms in the browser (WASM), after a 4-8× optimization (D70) |
 | Margin detection time, 113.7k-vertex scan | 733 ms in the browser (WASM) with Voronoi labelling, including cusp seeding; the graph cut adds ~100 ms per scan natively (36 → 137 ms labelling, 300-scan mean); browser not yet re-measured |
@@ -169,11 +170,15 @@ breakdown comes from `dmw_bench`.
   (D10). Topology diagnostics still work on any mesh.
 - **Handle loops are valid generators, not the shortest in their homology class.** Their lengths are upper bounds
   on handle size (measured 3.5× the tight cycle on a synthetic handle, D64).
-- **Not state of the art in accuracy:** per vertex, the graph cut reaches gingiva IoU 0.897 on the test split;
+- **Not state of the art in accuracy:** per vertex, the per-tooth cut reaches gingiva IoU 0.911 on part 6 (the binary
+  cut 0.897 on part 5);
   supervised networks trained on ~1,400 labelled scans report ~0.964 (CrossTooth, different split). This is a
   training-free geometric method with 3 tuned parameters; see D79 for the comparison and its caveats.
-- **The margin still has a tail:** HD95 is 2.37 mm on average on fresh data. Part 5 was evaluated several times
-  during development (each disclosed); part 6 was held back and evaluated once (D81). The Teeth3DS split is per
+- **The margin still has a tail:** HD95 is 1.98 mm on average on part 6. Part 5 was evaluated several times during
+  development (each disclosed); part 6 was held back, evaluated once for the binary cut (D81) and once for the
+  per-tooth cut (D85).
+- **Per-tooth labelling is slower:** 2.2 s of labelling per scan natively (0.2 s for the binary cut); in the browser
+  several seconds on a large scan. The Teeth3DS split is per
   jaw, so some test patients have their other jaw in training.
 - **"Margin" here is the tooth-gingiva boundary on unprepared arches,** not the finish line of a crown
   preparation that restoration design needs; related problems, not the same one.

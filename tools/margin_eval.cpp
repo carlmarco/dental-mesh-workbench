@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <limits>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,10 @@ struct Config {
         else if (p.method == Method::GraphCut)
             std::snprintf(b, sizeof b, "GraphCut mu=%.2f beta=%.0f alpha=%.0f tq=%.2f islands<%.0f%s", p.cut_smoothness, p.cut_crease,
                           p.valley_weight, p.tooth_quantile, p.min_tooth_region, p.seed_model ? " + classifier" : "");
+        else if (p.method == Method::PerToothCut)
+            std::snprintf(b, sizeof b, "PerToothCut tau=%s strip<%s R=%.0f%s", p.group_crease >= 1e8 ? "none" : std::to_string(p.group_crease).substr(0, 5).c_str(),
+                          p.strip_kmin < -1e8 ? "off" : std::to_string(p.strip_kmin).substr(0, 4).c_str(), p.expansion_radius,
+                          p.seed_model ? " + classifier" : "");
         else if (p.cusp_seed_quantile == kHeightOracle) std::snprintf(b, sizeof b, "ORACLE: height seeds on true gingiva removed (+clf)");
         else if (p.cusp_seed_quantile == kBothOracles) std::snprintf(b, sizeof b, "ORACLE: all tooth seeds on true gingiva removed");
         else if (p.cusp_seed_quantile < 0.0) std::snprintf(b, sizeof b, "ORACLE: cusp seeds on true gingiva removed");
@@ -102,12 +107,15 @@ std::vector<Config> score_configs() {
     return {{graph_cut(false)}, {ext}};
 }
 std::vector<Config> test_configs() {
-    std::vector<Config> c{{voronoi(2560.0, 0.0, 0.15, 1.0, true)}, {graph_cut(false)}};  // public point before / after D78
+    // #5 (D85, 2026-10-08): per-tooth cut, tau -1.25, chosen on sweep scans and validated before the run. On part 6
+    // this is its second look (the first, D81, evaluated the binary graph cut). Row 0 = the D78/D81 public point.
+    MarginParams pt = graph_cut(false), ptc;
+    pt.method = Method::PerToothCut, pt.group_crease = -1.25;
+    ptc = pt;
+    std::vector<Config> c{{graph_cut(false)}, {pt}};
     if (g_seed_model) {
-        MarginParams vclf = voronoi(2560.0, 0.0, 0.15, 1.0, true);
-        vclf.seed_model = g_seed_model, vclf.seed_threshold = 0.5;
-        c.push_back({vclf});
-        c.push_back({graph_cut(true)});
+        ptc.seed_model = g_seed_model, ptc.seed_threshold = 0.5;
+        c.push_back({ptc});
     }
     return c;
 }
@@ -134,6 +142,41 @@ std::vector<Config> validate_configs() {
     }
     if (g_experiment == "errors") {
         c.push_back({graph_cut(false)});  // D80: where does the per-vertex error of the public method sit?
+        return c;
+    }
+    if (g_experiment == "pertooth_validate" || g_experiment == "errors_pertooth") {  // D85: chosen tau -1.25, R 3
+        MarginParams p = graph_cut(false);
+        p.method = Method::PerToothCut, p.group_crease = -1.25;
+        if (g_experiment == "pertooth_validate") {
+            c.push_back({graph_cut(false)});
+            c.push_back({p});
+            MarginParams pc = p;
+            pc.seed_model = g_seed_model, pc.seed_threshold = 0.5;
+            c.push_back({pc});
+        } else {
+            c.push_back({p});
+        }
+        return c;
+    }
+    if (g_experiment == "pertooth") {  // D85: per-tooth cut vs the public binary cut (sweep scans)
+        c.push_back({graph_cut(false)});
+        auto pt = [](double tau, double strip) {
+            MarginParams p = graph_cut(false);
+            p.method = Method::PerToothCut, p.group_crease = tau, p.strip_kmin = strip;
+            return p;
+        };
+        // Sweep 1: tau -1.5 without carving 0.285 (t -3.0, worse 3/60); every carving variant (strip < 0 or -2, tau
+        // -1.25/-1.5/-1.75) was worse than the binary cut (+0.040..+0.080). Sweep 2 (this): tau, no carving.
+        // Sweep 2: tau {-1.25..-2}, no carving: best -1.25 (0.272, t -3.2), the grid edge. Sweep 3 (this): toward
+        // more splitting, up to one label per tip (1e9); plus -1.25 without the expansion radius (equivalence check).
+        for (double tau : {-0.75, -1.0, -1.25, 1e9}) c.push_back({pt(tau, -1e9)});
+        MarginParams full = pt(-1.25, -1e9);
+        full.expansion_radius = 0.0;
+        c.push_back({full});
+        return c;
+    }
+    if (g_experiment == "groups") {  // D85: cusp grouping on the public cut's tooth region (sweep scans)
+        c.push_back({graph_cut(false)});
         return c;
     }
     if (g_experiment == "errors_voronoi") {  // D82: the same decomposition for first-arrival Voronoi
@@ -450,6 +493,44 @@ void error_breakdown(const HalfEdgeMesh& m, const MarginInputs& in, std::span<co
     }
 }
 
+// D85: how well does group_cusps recover teeth? Tips on true teeth only (FDI at the tip vertex); pairs of
+// tips: same tooth & same group = kept together; different teeth & same group = merge; same tooth & different
+// groups = split. A tooth is "clean" if all its tips share one group that holds no other tooth's tips.
+const std::vector<double> kGroupTaus{-0.75, -1.0, -1.25, -1.5, -1.75, -2.0};  // sweep 1: -0.5..-6, best -1 (clean 82%)
+struct GroupStats {
+    std::size_t together = 0, merged = 0, split = 0, teeth = 0, clean = 0, tips_on_gingiva = 0, tips = 0, ungrouped = 0;
+};
+std::vector<GroupStats> g_groups(kGroupTaus.size());
+void group_eval(const HalfEdgeMesh& m, const MarginInputs& in, std::span<const std::uint8_t> tooth, const std::vector<int>& fdi) {
+    for (std::size_t ti = 0; ti < kGroupTaus.size(); ++ti) {
+        const auto g = group_cusps(m, in.cusp_tips, tooth, in.kmin, kGroupTaus[ti]);
+        GroupStats& st = g_groups[ti];
+        std::map<int, std::vector<int>> groups_of_tooth;  // FDI -> groups of its tips
+        std::map<int, std::set<int>> teeth_of_group;
+        for (std::size_t i = 0; i < g.size(); ++i) {
+            const int t = fdi[in.cusp_tips[i]];
+            ++st.tips;
+            if (t == 0) { ++st.tips_on_gingiva; continue; }
+            if (g[i] < 0) { ++st.ungrouped; continue; }
+            groups_of_tooth[t].push_back(g[i]);
+            teeth_of_group[g[i]].insert(t);
+        }
+        std::vector<std::pair<int, int>> tg;  // (tooth, group) per grouped tip on a tooth
+        for (const auto& [t, gs] : groups_of_tooth)
+            for (int x : gs) tg.push_back({t, x});
+        for (std::size_t i = 0; i < tg.size(); ++i)
+            for (std::size_t j = i + 1; j < tg.size(); ++j) {
+                const bool same_tooth = tg[i].first == tg[j].first, same_group = tg[i].second == tg[j].second;
+                st.together += same_tooth && same_group, st.merged += !same_tooth && same_group, st.split += same_tooth && !same_group;
+            }
+        for (const auto& [t, gs] : groups_of_tooth) {
+            ++st.teeth;
+            const bool one = std::all_of(gs.begin(), gs.end(), [&](int x) { return x == gs[0]; });
+            st.clean += one && teeth_of_group[gs[0]].size() == 1;
+        }
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -568,6 +649,7 @@ int main(int argc, char** argv) {
             totals[c].add(compare_boundaries(edge_midpoints(m, label_boundary_edges(m, tooth)), gt_line),
                           region_iou(tooth, truth, ops.star0));
             totals[c].add_vertex(tooth, truth);
+            if (g_experiment == "groups") group_eval(m, in, tooth, fdi);
             if (g_experiment.rfind("errors", 0) == 0) error_breakdown(m, in, tooth, truth, fdi, ops.star0);
             if (mode == "test") {  // the library path, end to end
                 const MarginResult lib = detect_margin(m, p);
@@ -601,6 +683,18 @@ int main(int argc, char** argv) {
         std::printf("  %-60s accuracy %.4f, tooth IoU %.4f, gingiva IoU %.4f, mean of the two %.4f\n", configs[i].label().c_str(),
                     mean(totals[i].vacc), mean(totals[i].viou_tooth), mean(totals[i].viou_gingiva),
                     0.5 * (mean(totals[i].viou_tooth) + mean(totals[i].viou_gingiva)));
+    if (g_experiment == "groups") {
+        std::printf("\ncusp grouping (tips on true teeth; pairs: together / merged across teeth / split within a tooth):\n");
+        for (std::size_t ti = 0; ti < kGroupTaus.size(); ++ti) {
+            const GroupStats& st = g_groups[ti];
+            const double pairs_same = double(st.together + st.split), pairs_grouped = double(st.together + st.merged);
+            std::printf("  tau %5.2f: pair precision %.3f, pair recall %.3f, clean teeth %.1f%% of %zu, ungrouped tips %.1f%% (tips on gingiva %.1f%%)\n",
+                        kGroupTaus[ti], pairs_grouped > 0 ? double(st.together) / pairs_grouped : 0.0,
+                        pairs_same > 0 ? double(st.together) / pairs_same : 0.0, 100.0 * double(st.clean) / double(std::max<std::size_t>(st.teeth, 1)),
+                        st.teeth, 100.0 * double(st.ungrouped) / double(std::max<std::size_t>(st.tips, 1)),
+                        100.0 * double(st.tips_on_gingiva) / double(std::max<std::size_t>(st.tips, 1)));
+        }
+    }
     if (g_experiment.rfind("errors", 0) == 0) {
         const auto& e = g_errors;
         const double err = e.false_gingiva_missed + e.false_gingiva_partial + e.false_tooth;

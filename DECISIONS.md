@@ -757,3 +757,35 @@ Each entry: the choice, the alternatives considered, and the reason.
   within 0.5 mm of both labelled strip edges for ~75% of these misses, which would recover most of the ~5.6% of
   true boundary lost here (upper bound for F1@0.5 roughly +0.03; not yet measured). Prerequisite: grouping cusp
   seeds into teeth.
+
+## D85. Per-tooth labelling: cusp grouping + multi-label graph cut (alpha-expansion)
+- From D84: two labels cannot express "tooth A | tooth B", so bridged interdental papillae cost no boundary.
+  PerToothCut keeps the GraphCut result, groups the seed cusps into teeth and re-labels with gingiva + one label per
+  group, minimizing the same energy (Potts boundary costs; unary p_l proportional to 1/d_l, which reduces to the
+  binary p = d_G / (d_T + d_G) for two labels) by alpha-expansion (Boykov, Veksler, Zabih, PAMI 2001).
+- Cusp grouping (group_cusps): tips connected inside the binary tooth region through vertices with kappa_min > tau.
+  Checked against the FDI labels (60 sweep scans, 793 teeth): tau -1.25 pair precision 0.918, recall 0.884, clean
+  teeth 86.1%; -1.0 82.0%; -1.5 85.6%; -2.0 74.0%.
+- Alpha-expansion is its own module (core/multilabel), each move an exact s-t cut via the Kolmogorov-Zabih
+  construction, using the D78 max-flow. Tests (brute force, n <= 7, up to 4 labels): energy never increases, the
+  result is a local minimum over all expansion moves, within 2x the global optimum (the Potts bound); with two labels
+  one move is the exact binary min cut. 4 mutants (sign of a linear term, dropped pair arc, swapped terminals, single
+  sweep) all killed. Speed: nodes already labelled alpha are left out of each move (exact), and a candidate filter
+  restricts a move to vertices within 3 mm grid cells of the label's current region (approximate): identical
+  metrics on the sweep scans, 7.4 -> 2.5 s labelling per scan.
+- Strip carving (the deeper vertex of each tooth|tooth edge becomes gingiva, reproducing the labels' one-vertex
+  strip): **every variant worse** than the binary cut (+0.040..+0.080 mm, worse on 45-51 of 60). Off by default.
+  The multi-label cut alone is what helps: separate tooth labels change both the unary and which boundaries are cheap.
+- Sweeps (60 sweep scans, binary cut 0.323): tau -1.5 0.285; then -1.25 0.272 / -1.5 0.285 / -1.75 0.292 / -2.0
+  0.311 (edge); then -0.75 0.276 / -1.0 0.276 / -1.25 0.272 / one label per tip 0.290 (worse on 21): **tau -1.25**,
+  interior. Grouping matters.
+- Validation (120 scans): 0.344 -> **0.283 mm** (median 0.237), HD95 2.38 -> 2.05, F1@0.5 0.886 -> **0.910**, IoU
+  0.933 -> 0.940, per-vertex gingiva IoU 0.909 -> 0.915; paired -0.061, t = -4.7, better on 105, 3 worse by > 0.1 mm.
+  F1 decomposition: recall 0.855 -> 0.888; recall misses > 1 mm off 9.4% -> 6.5%; fake regions 4.0% -> 2.3%;
+  missed teeth 1.5% -> 1.9%.
+- **Part 6 (second look; the first, D81, was the binary cut), 299 scans:** 0.357 -> **0.285 mm** (median 0.219),
+  HD95 2.37 -> **1.98**, F1@0.25 0.829 -> 0.858, F1@0.5 0.880 -> **0.906**, IoU 0.927 -> **0.936**; per-vertex accuracy
+  0.959, gingiva IoU 0.911; paired -0.072 mm, t = -7.3, better on 265, worse on 34 (1 by > 0.1 mm, largest +0.260).
+  Validation predicted it (-0.061). Classifier on top: 0.282 (-0.004). Library path agrees.
+- Cost: labelling 0.2 -> 2.2 s per scan native (300-scan mean); in the browser 6.8 s on a 164k-vertex scan, measured
+  while another evaluation was running (an upper bound; to be re-measured). Now the public operating point.

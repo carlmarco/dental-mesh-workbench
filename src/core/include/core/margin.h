@@ -25,9 +25,15 @@ namespace dmw {
 //                    likelihood, D = -log p or -log(1 - p)), l*_e the cotan dual edge length, and seeds
 //                    as hard constraints. A fake tooth region on flat gingiva pays mu per mm of its
 //                    boundary, so it survives only if its unary evidence outweighs its perimeter.
+//   PerToothCut      (D85) the GraphCut result, then cusp seeds grouped into teeth (group_cusps on its tooth
+//                    region) and a multi-label cut (gingiva + one label per group) by alpha-expansion: unary
+//                    p_l proportional to 1 / d_l (reduces to the GraphCut unary for two labels), the same
+//                    boundary costs (Potts). Two touching crowns now need a boundary between them; where it runs
+//                    down a valley (kappa_min < strip_kmin) its deeper vertex becomes gingiva, the one-vertex
+//                    interdental strip of the labels (D84).
 // Only the largest component (the arch) is labelled; everything else is gingiva.
 struct MarginParams {
-    enum class Method { HeightPlane, GeodesicVoronoi, GraphCut };
+    enum class Method { HeightPlane, GeodesicVoronoi, GraphCut, PerToothCut };
     Method method = Method::GeodesicVoronoi;
     double plane_quantile = 0.5;     // HeightPlane: tooth above this height quantile
     double valley_weight = 10.0;     // alpha (mm); 0 = plain geodesic Voronoi
@@ -36,6 +42,12 @@ struct MarginParams {
     double tooth_quantile = 0.9;     // tooth seeds: arch vertices above this height quantile
     double cut_smoothness = 1.0;     // GraphCut: mu (mm), boundary cost per mm of cut on flat surface
     double cut_crease = 100.0;       // GraphCut: beta (mm), how much cheaper a cut is along a crease
+    double group_crease = -1.5;      // PerToothCut: tau for group_cusps (1/mm); >= 1e8 = no grouping (one label per tip)
+    double strip_kmin = -1e300;      // PerToothCut: carve tooth|tooth boundary vertices with kappa_min below this (off:
+                                     // every carving variant was worse on the sweep scans, D85)
+    int expansion_sweeps = 3;        // PerToothCut: alpha-expansion sweeps over all labels (stops early if stable)
+    double expansion_radius = 3.0;   // PerToothCut: a move to label l only considers vertices within ~this (mm, grid
+                                     // cells) of vertices labelled l (0 = all vertices; D85 speed)
     double min_tooth_region = 0.0;   // relabel tooth components smaller than this area (mm^2) as gingiva (D80)
     bool cusp_seeds = true;          // also seed teeth at detected cusp tips (detect_cusps, D68 point)
     double cusp_seed_quantile = 0.0; // keep only cusp seeds above this arch-height quantile (D75; 0 = all)
@@ -80,6 +92,13 @@ std::vector<double> valley_strength(const DecOperators& ops, std::span<const dou
 // The labelling step for either method, given precomputed inputs (valley ignored for HeightPlane).
 std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& mesh, const MarginInputs& in, std::span<const double> valley,
                                         const MarginParams& params);
+
+// Group cusp tips into teeth (D85): two tips share a group iff they are connected inside `region` through
+// vertices with kappa_min > tau (no crease deeper than tau on the way). Adjacent crowns meet in a deep valley
+// (D84), while cusps of one crown are joined by ridges. Returns a group id per tip (0..G-1), or -1 for a tip
+// outside the region or itself at kappa_min <= tau.
+std::vector<int> group_cusps(const HalfEdgeMesh& mesh, std::span<const std::uint32_t> tips, std::span<const std::uint8_t> region,
+                             std::span<const double> kmin, double tau);
 
 // Edges whose endpoints carry different binary labels (the margin line for tooth/gingiva labels).
 std::vector<Edge> label_boundary_edges(const HalfEdgeMesh& mesh, std::span<const std::uint8_t> label);
