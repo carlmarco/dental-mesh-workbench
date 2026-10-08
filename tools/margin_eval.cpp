@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <map>
@@ -50,7 +51,8 @@ struct Config {
         else if (p.method == Method::PerToothCut)
             std::snprintf(b, sizeof b, "PerToothCut tau=%s strip<%s R=%.0f label_r=%.0f%s%s", p.group_crease >= 1e8 ? "none" : std::to_string(p.group_crease).substr(0, 5).c_str(),
                           p.strip_kmin < -1e8 ? "off" : std::to_string(p.strip_kmin).substr(0, 4).c_str(), p.expansion_radius,
-                          p.label_radius, p.star_prior ? (p.star_plain ? " star(plain)" : " star") : "", p.seed_model ? " + classifier" : "");
+                          p.label_radius, p.star_prior ? (p.star_plain ? " star(plain)" : " star") : "",
+                          p.vertex_model ? (" + unary w=" + std::to_string(p.vertex_weight).substr(0, 4)).c_str() : (p.seed_model ? " + classifier" : ""));
         else if (p.cusp_seed_quantile == kHeightOracle) std::snprintf(b, sizeof b, "ORACLE: height seeds on true gingiva removed (+clf)");
         else if (p.cusp_seed_quantile == kBothOracles) std::snprintf(b, sizeof b, "ORACLE: all tooth seeds on true gingiva removed");
         else if (p.cusp_seed_quantile < 0.0) std::snprintf(b, sizeof b, "ORACLE: cusp seeds on true gingiva removed");
@@ -87,6 +89,7 @@ std::vector<Config> sweep_configs() {
 
 const LogisticModel* g_seed_model = nullptr;  // set from the command line (D76)
 MarginTimings g_timings;  // D86 profile experiment
+const LogisticModel* g_vertex_model = nullptr;  // D88: from $DMW_VERTEX_MODEL (learned per-vertex data term)
 
 // Fixed operating points for the test set, from the TRAINING sweeps (60 scans of part 1, 2026-10-06).
 // Edit only from training results, never from test results.
@@ -143,6 +146,17 @@ std::vector<Config> validate_configs() {
     }
     if (g_experiment == "errors") {
         c.push_back({graph_cut(false)});  // D80: where does the per-vertex error of the public method sit?
+        return c;
+    }
+    if (g_experiment == "unary") {  // D88: learned data term weight w on the per-tooth cut (sweep scans)
+        MarginParams p = graph_cut(false);
+        p.method = Method::PerToothCut, p.group_crease = -1.25;
+        c.push_back({p});
+        for (double w : {0.25, 0.5, 1.0, 2.0, 4.0}) {
+            MarginParams q = p;
+            q.vertex_model = g_vertex_model, q.vertex_weight = w;
+            c.push_back({q});
+        }
         return c;
     }
     if (g_experiment == "star") {  // D87: geodesic star-convexity prior on the per-tooth cut (sweep scans)
@@ -592,6 +606,16 @@ int main(int argc, char** argv) {
         }
     }
     g_seed_model = seed_model.weights.empty() ? nullptr : &seed_model;
+    LogisticModel vertex_model;
+    if (const char* vm = std::getenv("DMW_VERTEX_MODEL")) {
+        std::string err;
+        vertex_model = parse_logistic_model(dataset::read_text(vm), err);
+        if (!err.empty()) {
+            std::fprintf(stderr, "vertex model: %s\n", err.c_str());
+            return 2;
+        }
+        g_vertex_model = &vertex_model;
+    }
     if (!score && argc > 6) g_experiment = argv[6];
     const std::size_t max_remainder = !score && argc > 7 ? std::stoul(argv[7]) : stride - 1;
     const auto objs = dataset::index_files({argv[2]}, ".obj");

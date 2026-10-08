@@ -823,3 +823,20 @@ Each entry: the choice, the alternatives considered, and the reason.
 - Why weighted trees change nothing: a region attached through a crease gap is reached by shortest paths through
   that same gap, so it is star-shaped in that metric; the remaining fake regions are mostly around false seeds,
   which are their own centres. The prior constrains shape, not seed correctness.
+
+## D88. Learned per-vertex data term (logistic regression): mixed result, not adopted
+- Model: P(tooth | 9 label-free features): log(d_G/d_T) of the crease-weighted distances, height quantile, normal .
+  occlusal axis, kappa_min, kappa_max, log(1 + geodesic distance to the cut), log(1 + geodesic distance to the
+  nearest tooth seed), squares of height quantile and normal term. Added to the cut as -w A log P (tooth labels) and
+  -w A log(1 - P) (gingiva), in both the binary and per-tooth cuts. tools/vertex_train: folds {1,2} train, {0}
+  tune w, {3,4} validation; per scan 1,500 random arch vertices + 1,500 within 1.5 mm of the true boundary.
+  Unit test: a neutral model (P = 0.5) changes nothing; a confident tooth model only grows tooth regions.
+- Validation ROC AUC 0.958 (training 0.956), BELOW the single feature log(d_G/d_T) (0.970): the linear model
+  is miscalibrated on the clamped, non-linear distance ratio, and the strongest signal is the one the cut already
+  uses. Next strongest: distance to the nearest seed (0.856), height quantile (0.840).
+- Sweep on the 60 sweep scans (per-tooth cut 0.274 mm): w 0.25 0.271 (t -0.3, 2 scans worse by > 0.1 mm, up to
+  +0.38), w 0.5 0.278, w 1 0.309, w 2 0.330, w 4 0.402. Region metrics improve slightly at w 0.25-0.5 (IoU 0.936 ->
+  0.941, per-vertex gingiva IoU 0.922 -> 0.928), boundary metrics do not (F1@0.5 +0.002, HD95 1.94 -> 2.00), and new
+  large regressions appear. **Not adopted** (D76/D77 reliability rule). Code stays, off by default; the model file
+  is local (data/models, licence question as D76). A binned (additive) model could calibrate better; headroom is
+  small because the dominant signal is already in the cut.

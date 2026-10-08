@@ -36,3 +36,9 @@ target_compile_options(margin_analyze PRIVATE -Wall -Wextra -Wpedantic -Wconvers
 add_executable(seed_train seed_train.cpp)
 target_link_libraries(seed_train PRIVATE dmw_core)
 target_compile_options(seed_train PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Learned per-vertex data term for the margin cut (D88): trains on Teeth3DS part 1 folds {1,2}.
+#   ./build-release/tools/vertex_train data/data_part_1 data/models/vertex_logistic.json
+add_executable(vertex_train vertex_train.cpp)
+target_link_libraries(vertex_train PRIVATE dmw_core)
+target_compile_options(vertex_train PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)

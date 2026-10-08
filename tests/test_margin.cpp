@@ -268,3 +268,36 @@ TEST_CASE("margin: per-tooth cut with strip carving keeps gingiva between two to
     for (std::size_t v = 0; v < a.size(); ++v) differ += a[v] != b[v], crowns += a[v];
     CHECK(differ < crowns / 20);
 }
+
+TEST_CASE("margin: learned data term - a neutral model changes nothing, a confident one only grows the teeth", "[margin]") {
+    const auto mesh = he(crown_patch());
+    const MarginInputs in = margin_inputs(mesh, false);
+    MarginParams base = margin_operating_point();
+    base.method = MarginParams::Method::GraphCut;
+    base.cusp_seeds = false;
+    const auto valley = valley_strength(build_dec(mesh), in.kmin, base.curvature_scale);
+    std::vector<double> feat;
+    MarginParams with_out = base;
+    with_out.vertex_features_out = &feat;
+    const auto plain = margin_labels(mesh, in, valley, with_out);
+    CHECK(feat.size() == mesh.positions.size() * kVertexFeatureCount);
+    CHECK(vertex_feature_names().size() == kVertexFeatureCount);
+
+    LogisticModel neutral;  // P = 0.5 everywhere: adds the same cost to both labels
+    neutral.mean.assign(kVertexFeatureCount, 0.0);
+    neutral.scale.assign(kVertexFeatureCount, 1.0);
+    neutral.weights.assign(kVertexFeatureCount, 0.0);
+    MarginParams n = base;
+    n.vertex_model = &neutral;
+    CHECK(margin_labels(mesh, in, valley, n) == plain);
+
+    LogisticModel tooth = neutral;  // P ~ 1: tooth everywhere it is not hard-constrained
+    tooth.bias = 10.0;
+    MarginParams t = base;
+    t.vertex_model = &tooth, t.vertex_weight = 1e3;
+    const auto grown = margin_labels(mesh, in, valley, t);
+    std::size_t lost = 0, gained = 0;
+    for (std::size_t v = 0; v < plain.size(); ++v) lost += plain[v] && !grown[v], gained += !plain[v] && grown[v];
+    CHECK(lost == 0);
+    CHECK(gained > 0);
+}

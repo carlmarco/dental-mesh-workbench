@@ -89,6 +89,13 @@ void remove_small_tooth_regions(const HalfEdgeMesh& m, std::vector<std::uint8_t>
 
 }  // namespace
 
+const std::vector<std::string>& vertex_feature_names() {
+    static const std::vector<std::string> names{"log_dG_over_dT", "height_quantile", "normal_dot_axis", "kappa_min", "kappa_max",
+                                                "log1p_dist_to_cut", "log1p_dist_to_tooth_seed", "height_quantile_sq",
+                                                "normal_dot_axis_sq"};
+    return names;
+}
+
 const std::vector<std::string>& seed_feature_names() {
     static const std::vector<std::string> names{"prominence_mm", "height_quantile", "normal_dot_axis",
                                                 "distance_to_cut_mm", "smoothed_mean_curvature", "smoothed_gaussian_curvature"};
@@ -158,6 +165,7 @@ MarginInputs margin_inputs(const HalfEdgeMesh& m, bool with_cusps) {
     MarginInputs in;
     in.arch = largest_component_mask(m);
     const Vec3 axis = occlusal_axis(m, in.arch);
+    in.axis = axis;
     in.height.resize(nv);
     for (std::size_t v = 0; v < nv; ++v) {
         in.height[v] = dot(m.positions[v], axis);
@@ -168,8 +176,11 @@ MarginInputs margin_inputs(const HalfEdgeMesh& m, bool with_cusps) {
         if (m.twin[h] == kInvalid && in.arch[m.origin[h]]) in.cut_vertices.push_back(m.origin[h]);
     }
     const CurvatureField curv = compute_curvature(m);
-    in.kmin.resize(nv);
-    for (std::size_t v = 0; v < nv; ++v) in.kmin[v] = std::isfinite(curv.k2[v]) ? curv.k2[v] : 0.0;
+    in.kmin.resize(nv), in.kmax.resize(nv);
+    for (std::size_t v = 0; v < nv; ++v) {
+        in.kmin[v] = std::isfinite(curv.k2[v]) ? curv.k2[v] : 0.0;
+        in.kmax[v] = std::isfinite(curv.k1[v]) ? curv.k1[v] : 0.0;
+    }
     if (with_cusps) {
         const CuspDetection cusps = detect_cusps(m, cusp_operating_point());
         in.cusp_tips = cusps.vertices;
@@ -313,6 +324,52 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     arrival([](std::uint8_t l) { return l == 1; }, dt, nullptr);
     arrival([](std::uint8_t l) { return l == 0; }, dg, nullptr);
     lap(&MarginTimings::binary_dijkstra);
+    // --- Learned data term (D88): per-vertex features, then P(tooth) from the model.
+    std::vector<double> p_tooth;
+    if (p.vertex_model || p.vertex_features_out) {
+        constexpr std::size_t K = kVertexFeatureCount;
+        std::vector<double> to_cut, to_seed;
+        {  // plain geodesic distances (edge lengths) from the cut boundary and from the tooth seeds
+            std::vector<std::uint8_t> keep = label;
+            std::vector<std::uint8_t> mark(nv, 2);
+            for (std::uint32_t v : in.cut_vertices) mark[v] = 0;
+            label = mark;
+            arrival([](std::uint8_t l) { return l == 0; }, to_cut, nullptr, {}, nullptr, true);
+            label = keep;
+            arrival([](std::uint8_t l) { return l == 1; }, to_seed, nullptr, {}, nullptr, true);
+        }
+        std::vector<Vec3> normal(nv, Vec3{});
+        for (std::size_t f = 0; f < m.origin.size() / 3; ++f) {
+            const std::uint32_t a = m.origin[3 * f], b = m.origin[3 * f + 1], c = m.origin[3 * f + 2];
+            const Vec3 n = cross(m.positions[b] - m.positions[a], m.positions[c] - m.positions[a]);
+            normal[a] += n, normal[b] += n, normal[c] += n;
+        }
+        std::vector<double> feat(nv * K, 0.0);
+        auto finite_log1p = [](double d) { return std::isfinite(d) ? std::log1p(d) : std::log1p(100.0); };
+        for (std::size_t v = 0; v < nv; ++v) {
+            if (!in.arch[v]) continue;
+            double* x = &feat[v * K];
+            const double lt = std::isfinite(dt[v]) ? std::log(dt[v] + 1e-9) : 30.0, lg = std::isfinite(dg[v]) ? std::log(dg[v] + 1e-9) : 30.0;
+            const double nn = norm(normal[v]);
+            const double hq = hs.empty() ? 0.0 : double(std::lower_bound(hs.begin(), hs.end(), in.height[v]) - hs.begin()) / double(hs.size());
+            const double nd = nn > 0.0 ? dot(normal[v], in.axis) / nn : 0.0;
+            x[0] = std::clamp(lg - lt, -30.0, 30.0);
+            x[1] = hq;
+            x[2] = nd;
+            x[3] = std::clamp(in.kmin[v], -20.0, 20.0);
+            x[4] = std::clamp(in.kmax.empty() ? 0.0 : in.kmax[v], -20.0, 20.0);
+            x[5] = finite_log1p(to_cut[v]);
+            x[6] = finite_log1p(to_seed[v]);
+            x[7] = hq * hq;
+            x[8] = nd * nd;
+        }
+        if (p.vertex_model) {
+            p_tooth.assign(nv, 0.5);
+            for (std::size_t v = 0; v < nv; ++v)
+                if (in.arch[v]) p_tooth[v] = std::clamp(p.vertex_model->probability(std::span<const double>(&feat[v * K], K)), 1e-6, 1.0 - 1e-6);
+        }
+        if (p.vertex_features_out) *p.vertex_features_out = std::move(feat);
+    }
     std::vector<double> area(nv, 0.0), dual(m.origin.size(), 0.0);  // lumped areas; dual length per half-edge
     for (std::uint32_t f = 0; f < m.origin.size() / 3; ++f) {
         const std::array<std::uint32_t, 3> c{m.origin[3 * f], m.origin[3 * f + 1], m.origin[3 * f + 2]};
@@ -346,7 +403,12 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
             const double t = dt[v], s = dg[v];
             const double pt = !std::isfinite(t) ? 0.0 : !std::isfinite(s) ? 1.0 : s / (s + t);
             // Source side = tooth pays the sink capacity: D(tooth) = -A log p; D(gingiva) = -A log(1 - p).
-            g.add_terminal(node[v], -area[v] * std::log(std::max(1.0 - pt, kEps)), -area[v] * std::log(std::max(pt, kEps)));
+            double src = -area[v] * std::log(std::max(1.0 - pt, kEps)), snk = -area[v] * std::log(std::max(pt, kEps));
+            if (!p_tooth.empty()) {  // learned data term (D88)
+                src += -p.vertex_weight * area[v] * std::log(1.0 - p_tooth[v]);
+                snk += -p.vertex_weight * area[v] * std::log(p_tooth[v]);
+            }
+            g.add_terminal(node[v], src, snk);
         }
     }
     if (p.cut_smoothness > 0.0) {
@@ -436,6 +498,10 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
             total += inv[l];
         }
         for (std::size_t l = 0; l < labels; ++l) u[l] = -area[v] * std::log(std::max(total > 0.0 ? inv[l] / total : 0.0, kEps));
+        if (!p_tooth.empty()) {  // learned data term (D88)
+            u[0] += -p.vertex_weight * area[v] * std::log(1.0 - p_tooth[v]);
+            for (std::size_t l = 1; l < labels; ++l) u[l] += -p.vertex_weight * area[v] * std::log(p_tooth[v]);
+        }
     }
     // Pairwise Potts weights (same as the binary cut).
     std::vector<PottsEdge> pairs;

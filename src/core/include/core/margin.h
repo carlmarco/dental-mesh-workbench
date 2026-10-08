@@ -69,6 +69,12 @@ struct MarginParams {
     // DIAGNOSTICS ONLY (oracle experiments, D77): vertices flagged 1 may not seed teeth. Null = off.
     const std::vector<std::uint8_t>* tooth_seed_veto = nullptr;
     MarginTimings* timings = nullptr;  // diagnostics: per-stage wall time (null = off)
+    // Learned per-vertex data term (D88): P(tooth | local features) from a logistic model adds
+    // -w A log P to tooth labels and -w A log(1 - P) to gingiva (binary and per-tooth cuts). Non-owning; null = off.
+    const LogisticModel* vertex_model = nullptr;
+    double vertex_weight = 1.0;
+    // Training hook: if set, receives kVertexFeatureCount features per vertex (row-major; zeros off the arch).
+    std::vector<double>* vertex_features_out = nullptr;
 };
 
 struct MarginResult {
@@ -90,8 +96,17 @@ struct MarginInputs {
     std::vector<std::uint32_t> cusp_tips;    // detect_cusps at the D68 operating point (if requested)
     std::vector<double> seed_features;       // kSeedFeatureCount per cusp tip, row-major (D76)
     std::vector<double> kmin;                // minimum principal curvature (0 where undefined)
+    std::vector<double> kmax;                // maximum principal curvature (0 where undefined)
+    Vec3 axis{0, 0, 1};                      // occlusal axis (unit)
 };
 MarginInputs margin_inputs(const HalfEdgeMesh& mesh, bool with_cusps);
+
+// Label-free per-vertex features for the learned data term (D88), in this order: log(d_G / d_T) of the
+// crease-weighted arrival distances, height quantile, vertex normal . occlusal axis, kappa_min, kappa_max,
+// log(1 + geodesic distance to the scan cut), log(1 + geodesic distance to the nearest tooth seed), and the
+// squares of the height quantile and of the normal term.
+inline constexpr std::size_t kVertexFeatureCount = 9;
+const std::vector<std::string>& vertex_feature_names();
 
 // Label-free features of each cusp seed for the seed classifier (D76), in this order:
 //   prominence (mm), height quantile in the arch (0..1), vertex normal . occlusal axis,
