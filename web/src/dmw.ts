@@ -131,6 +131,13 @@ export class Dmw {
   }
 
   // Tooth-gingiva margin (operating point chosen on training scans, D73).
+  computeUndercut(best: boolean): { faces: Uint8Array; axis: number[]; tilt: number; fraction: number; teethOnly: boolean; millis: number } {
+    const t0 = performance.now();
+    const info = JSON.parse(this.session.computeUndercut(best)) as { error?: string; axis: number[]; tilt: number; fraction: number; teethOnly: boolean };
+    if (info.error) throw new Error(info.error);
+    return { ...info, faces: (this.session.undercutFaces() as Uint8Array).slice(), millis: performance.now() - t0 };
+  }
+
   detectMargin(): { edges: Uint32Array; millis: number } {
     const t0 = performance.now();
     const error = this.session.detectMargin();

@@ -26,6 +26,8 @@
         <div class="row">
           <button type="button" class="button" id="detect-margin">Detect margin</button>
           <button type="button" class="button" id="open-labels">Load tooth labels</button>
+          <button type="button" class="button" id="undercut">Undercut (occlusal axis)</button>
+          <button type="button" class="button" id="best-axis">Best path of insertion</button>
           <input type="file" id="labels" accept=".json" hidden />
         </div>
         <p class="hint">or drop a mesh on the view</p>
@@ -39,6 +41,7 @@
           <label><input type="radio" name="overlay" value="gaussian" /> Gaussian curvature K</label>
           <label><input type="radio" name="overlay" value="kmin" /> Min principal curvature κ<sub>min</sub> (creases)</label>
           <label><input type="radio" name="overlay" value="components" /> Components</label>
+          <label><input type="radio" name="overlay" value="undercut" /> Undercut (red) / reachable (green)</label>
           <label><input type="radio" name="overlay" value="geodesic" /> Geodesic distance (click a point)</label>
         </div>
         <label class="inline-check"><input type="checkbox" id="idt" /> Intrinsic Delaunay Laplacian</label>

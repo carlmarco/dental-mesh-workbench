@@ -7,7 +7,7 @@ import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js
 import { categorical, diverging, NO_DATA, robustRange, type RGB, sequential } from "./colormap.ts";
 import type { MeshData } from "./dmw.ts";
 
-export type Overlay = "shaded" | "mean" | "gaussian" | "kmin" | "components" | "geodesic";
+export type Overlay = "shaded" | "mean" | "gaussian" | "kmin" | "components" | "undercut" | "geodesic";
 
 export interface Layers {
   boundary: boolean;
@@ -33,6 +33,8 @@ export const LAYER_COLORS = {
 
 const EXCLUDED = 0xffffffff;
 const SHADED: RGB = [0.72, 0.75, 0.8];
+const UNDERCUT: RGB = [0.86, 0.2, 0.17]; // faces not reachable along the path of insertion (D90)
+const REACHABLE: RGB = [0.3, 0.68, 0.45];
 export const ISOLINES = 20; // isolines drawn at multiples of (max distance / ISOLINES)
 
 // 1D texture: sequential colors with a dark band at each isoline. Used with a texture
@@ -69,6 +71,7 @@ export class Viewer {
   private cuspPoints: Float32Array | null = null;  // detected tips, xyz
   private truthPoints: Float32Array | null = null; // loaded landmarks, xyz
   private marginEdges: Uint32Array | null = null;
+  private undercut: Uint8Array | null = null;
   private truthMarginEdges: Uint32Array | null = null;
   private source: number | null = null;
   private surface: THREE.Mesh | null = null;
@@ -125,6 +128,11 @@ export class Viewer {
     this.truthPoints = truth;
   }
 
+  // Per-face undercut classes for the "undercut" overlay (0 outside, 1 reachable, 2 undercut); null clears it.
+  setUndercut(faces: Uint8Array | null): void {
+    this.undercut = faces;
+  }
+
   setMargin(predicted: Uint32Array | null, truth: Uint32Array | null): void {
     this.marginEdges = predicted;
     this.truthMarginEdges = truth;
@@ -160,12 +168,15 @@ export class Viewer {
       geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
       geometry.setIndex(new THREE.BufferAttribute(d.indices, 1));
       map = this.isolines;
-    } else if (overlay === "components") {
+    } else if (overlay === "components" || (overlay === "undercut" && this.undercut)) {
       const nf = d.indices.length / 3;
       const pos = new Float32Array(nf * 9);
       const col = new Float32Array(nf * 9);
       for (let f = 0; f < nf; ++f) {
-        const c = d.faceComponent[f] === EXCLUDED ? NO_DATA : categorical(d.faceComponent[f]);
+        const c =
+          overlay === "undercut"
+            ? this.undercut![f] === 2 ? UNDERCUT : this.undercut![f] === 1 ? REACHABLE : SHADED
+            : d.faceComponent[f] === EXCLUDED ? NO_DATA : categorical(d.faceComponent[f]);
         for (let k = 0; k < 3; ++k) {
           const v = d.indices[3 * f + k];
           pos.set(d.positions.subarray(3 * v, 3 * v + 3), 9 * f + 3 * k);

@@ -78,6 +78,8 @@ function display(d: MeshData, keepCamera: boolean): void {
       cuspInfo = "";
       cuspMillis = null;
       marginInfo = "";
+      undercutInfo = "";
+      viewer.setUndercut(null);
       viewer.setMargin(null, null);
       viewer.setCusps(null, null);
     }
@@ -168,6 +170,7 @@ function renderStats(s: Stats, millis: number): void {
     ${s.excludedFaces ? `<p class="hint">${s.excludedFaces} faces at defects excluded from the half-edge analysis view (D69).</p>` : ""}
     ${cuspInfo ? `<h2>Cusps</h2><p>${cuspInfo}</p>` : ""}
     ${marginInfo ? `<h2>Margin</h2><p>${marginInfo}</p>` : ""}
+    ${undercutInfo ? `<h2>Undercut</h2><p>${undercutInfo}</p>` : ""}
     <h2>Curvature</h2>${curv}`;
 }
 
@@ -279,6 +282,22 @@ labelInput.addEventListener("change", async () => {
     errorBox.textContent = `Could not compare: ${(e as Error).message}`;
   }
 });
+
+let undercutInfo = "";
+function runUndercut(best: boolean): void {
+  if (!data) return;
+  try {
+    const u = dmw.computeUndercut(best);
+    viewer.setUndercut(u.faces);
+    undercutInfo = `${best ? "Best path of insertion" : "Occlusal axis"}: ${(100 * u.fraction).toFixed(1)}% of the ${u.teethOnly ? "detected teeth" : "mesh"} undercut, tilt ${u.tilt.toFixed(1)}° from the occlusal axis (${u.millis.toFixed(0)} ms)`;
+    document.querySelector<HTMLInputElement>('input[name="overlay"][value="undercut"]')!.checked = true;
+    display(data, true);
+  } catch (e) {
+    errorBox.textContent = (e as Error).message;
+  }
+}
+byId<HTMLButtonElement>("undercut").addEventListener("click", () => runUndercut(false));
+byId<HTMLButtonElement>("best-axis").addEventListener("click", () => runUndercut(true));
 
 viewer.onPick = (v) => {
   if (overlay() !== "geodesic" || !data) return;

@@ -42,3 +42,9 @@ target_compile_options(seed_train PRIVATE -Wall -Wextra -Wpedantic -Wconversion 
 add_executable(vertex_train vertex_train.cpp)
 target_link_libraries(vertex_train PRIVATE dmw_core)
 target_compile_options(vertex_train PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Undercut / path-of-insertion analysis on scans (M10b, D90).
+#   ./build-release/tools/undercut_eval data/data_part_1 15
+add_executable(undercut_eval undercut_eval.cpp)
+target_link_libraries(undercut_eval PRIVATE dmw_core)
+target_compile_options(undercut_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)

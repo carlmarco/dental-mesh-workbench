@@ -15,6 +15,8 @@
 #include "core/curvature.h"
 #include "core/cusps.h"
 #include "core/margin.h"
+#include "core/bvh.h"
+#include "core/undercut.h"
 #include "core/generate.h"
 #include "core/geodesic.h"
 #include "core/halfedge.h"
@@ -130,6 +132,42 @@ public:
           << ",\"iou\":" << iou << "}";
         return o.str();
     }
+    // Undercut map (M10b, D90) for the teeth (the detected tooth region if the margin was detected, else the whole
+    // mesh), along the occlusal axis or, with `best`, along the best path of insertion within 25 degrees of it.
+    // Per face: 0 outside the region, 1 reachable, 2 undercut. Returns JSON (axis, tilt, fraction).
+    std::string computeUndercut(bool best) {
+        if (!he_mesh_) return "{\"error\":\"undercut analysis needs a manifold analysis view\"}";
+        if (!bvh_) bvh_ = std::make_unique<Bvh>(mesh_.positions, mesh_.triangles);
+        std::vector<std::uint8_t> region;
+        if (!predicted_tooth_.empty()) {
+            region.assign(mesh_.triangles.size(), 0);
+            for (std::size_t f = 0; f < mesh_.triangles.size(); ++f) {
+                const auto& t = mesh_.triangles[f];
+                region[f] = predicted_tooth_[t[0]] && predicted_tooth_[t[1]] && predicted_tooth_[t[2]];
+            }
+        }
+        const Vec3 axis = occlusal_axis(*he_mesh_, largest_component_mask(*he_mesh_));
+        Vec3 used = axis;
+        UndercutResult r;
+        std::size_t evaluations = 1;
+        if (best) {
+            InsertionAxis b = best_insertion_axis(mesh_, *bvh_, region, axis, 25.0);
+            used = b.axis, r = std::move(b.result), evaluations = b.evaluations;
+        } else {
+            r = undercut_map(mesh_, *bvh_, axis, region);
+        }
+        undercut_faces_.assign(mesh_.triangles.size(), 0);
+        for (std::size_t f = 0; f < undercut_faces_.size(); ++f)
+            if (region.empty() || region[f]) undercut_faces_[f] = r.undercut[f] ? 2 : 1;
+        const double tilt = std::acos(std::min(1.0, std::max(-1.0, used.x * axis.x + used.y * axis.y + used.z * axis.z))) * 180.0 / std::acos(-1.0);
+        std::ostringstream o;
+        o.precision(6);
+        o << "{\"axis\":[" << used.x << "," << used.y << "," << used.z << "],\"tilt\":" << tilt << ",\"fraction\":" << r.fraction()
+          << ",\"evaluations\":" << evaluations << ",\"teethOnly\":" << (region.empty() ? "false" : "true") << "}";
+        return o.str();
+    }
+    val undercutFaces() const { return view(undercut_faces_); }  // uint8 per face: 0 outside, 1 reachable, 2 undercut
+
     val truthMarginEdges() const { return view(truth_edges_); }  // uint32 vertex pairs of all handle loops
 
     // Switch curvature and geodesics between the cotan and the intrinsic Delaunay Laplacian.
@@ -230,6 +268,8 @@ private:
         cusps_.clear();
         predicted_tooth_.clear();
         margin_edges_.clear();
+        bvh_.reset();
+        undercut_faces_.clear();
         truth_edges_.clear();
         update_curvature();
         // Handle loops (M8b): 2g generator cycles per component, shortest first (lengths are upper
@@ -297,6 +337,8 @@ private:
     std::vector<double> handle_lengths_;
     std::vector<std::uint32_t> cusps_, margin_edges_, truth_edges_;
     std::vector<std::uint8_t> predicted_tooth_;
+    std::unique_ptr<Bvh> bvh_;
+    std::vector<std::uint8_t> undercut_faces_;
 };
 
 }  // namespace
@@ -323,6 +365,8 @@ EMSCRIPTEN_BINDINGS(dmw) {
         .function("marginEdges", &Session::marginEdges)
         .function("compareMargin", &Session::compareMargin)
         .function("truthMarginEdges", &Session::truthMarginEdges)
+        .function("computeUndercut", &Session::computeUndercut)
+        .function("undercutFaces", &Session::undercutFaces)
         .function("setIntrinsicDelaunay", &Session::setIntrinsicDelaunay)
         .function("geodesic", &Session::geodesic)
         .function("distance", &Session::distance)

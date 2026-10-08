@@ -853,3 +853,31 @@ Each entry: the choice, the alternatives considered, and the reason.
 - Process fix: the mutation harness could test a stale binary when a restore and the next edit fell in the same
   second as the previous build (make compares mtimes). Now every mutant and restore is followed by a 1 s pause and a
   touch; all 11 mutants of D85/D87/D89 were re-run that way and are all killed.
+
+## D90. M10b: undercut map and best path of insertion (virtual surveyor)
+- Definition: for a unit withdrawal direction d, a face is undercut if it faces away from d (n . d < -tolerance) or
+  is hidden along d (a ray from its centroid towards +d hits the mesh, BVH any-hit; the origin is lifted 1e-7 of the
+  bounding diagonal along the face normal, so faces parallel to d, like a vertical wall, are reachable instead of
+  grazing their neighbours, which the first version did on 14 equatorial faces of an icosphere). Area-weighted over
+  a face region; the whole mesh occludes. Best axis: Fibonacci spiral over the cap within max_tilt of a hint, then a
+  pattern search on the sphere (step halving); ties go to the direction nearest the hint.
+- Tests with known answers: sphere (undercut = exactly the back-facing faces, fraction 0.5), a plate floating over a
+  base (exactly its 2 x 2 footprint, fraction 0.25), a tilted 6-degree-taper frustum (no undercut along its axis;
+  the search lands inside the undercut-free cone), a 1-degree taper with only 12 spiral samples (only the local
+  refinement reaches the 1-degree cone), and a tilt limit (the answer stays within it). 5 mutants killed (two only
+  after adding the last two tests: no local refinement, tilt limit ignored).
+- On scans (20 part-1 scans, 263 natural crowns defined by the FDI labels; median per tooth type):
+
+  | tooth type | crowns | undercut along occlusal axis | best axis within 25 deg | tilt | ms per tooth |
+  |---|---:|---:|---:|---:|---:|
+  | incisors | 79 | 23.8% | 8.0% | 17.4 deg | 739 |
+  | canines | 40 | 11.9% | 1.4% | 14.7 deg | 806 |
+  | premolars | 78 | 8.1% | 5.0% | 8.2 deg | 2,051 |
+  | molars | 66 | 5.5% | 1.1% | 12.0 deg | 4,414 |
+
+  One common path for all crowns of an arch: 13.8% -> 9.3% (tilt 12.2 deg). Incisors carry the most undercut along
+  the occlusal axis (labially inclined crowns), consistent with clinical practice of tilting the path for anteriors.
+  These are unprepared natural teeth (height of contour, removable-appliance retention), not crown preparations.
+- Speed: BVH build 111 ms per scan, ~0.9 M rays/s on one thread (measured while a VM used ~3 cores); a molar search
+  takes ~4 s natively, the whole-arch search 13.7 s in the browser. Next: coarse-to-fine (face subsampling for the
+  global stage) and threads. Viewer: "Undercut (occlusal axis)" / "Best path of insertion" buttons and an overlay.
