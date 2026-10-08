@@ -84,6 +84,7 @@ public:
     val indices() const { return view(indices_); }       // uint32, 3 per face (all faces)
     val mean() const { return view(mean_); }             // float32 per vertex, NaN = no data
     val gaussian() const { return view(gaussian_); }     // float32 per vertex, NaN = no data
+    val kmin() const { return view(kmin_); }             // float32 min principal curvature (creases < 0)
     val faceComponent() const { return view(face_component_); }  // uint32, kInvalid = excluded
     val boundaryEdges() const { return view(boundary_edges_); }  // uint32 vertex pairs
     val nonmanifoldEdges() const { return view(nonmanifold_edges_); }
@@ -278,6 +279,7 @@ private:
         };
         mean_ = to_f32(curvature_.mean, mesh_.positions.size());
         gaussian_ = to_f32(curvature_.gaussian, mesh_.positions.size());
+        kmin_ = to_f32(curvature_.k2, mesh_.positions.size());
     }
 
     bool intrinsic_delaunay_ = false;
@@ -289,7 +291,7 @@ private:
     std::unique_ptr<HalfEdgeMesh> he_mesh_;
     std::unique_ptr<HeatGeodesics> geodesics_;
     std::vector<float> distance_;
-    std::vector<float> positions_, mean_, gaussian_;
+    std::vector<float> positions_, mean_, gaussian_, kmin_;
     std::vector<std::uint32_t> indices_, face_component_, boundary_edges_, nonmanifold_edges_,
         misoriented_edges_, handle_edges_;
     std::vector<double> handle_lengths_;
@@ -308,6 +310,7 @@ EMSCRIPTEN_BINDINGS(dmw) {
         .function("indices", &Session::indices)
         .function("mean", &Session::mean)
         .function("gaussian", &Session::gaussian)
+        .function("kmin", &Session::kmin)
         .function("faceComponent", &Session::faceComponent)
         .function("boundaryEdges", &Session::boundaryEdges)
         .function("nonmanifoldEdges", &Session::nonmanifoldEdges)

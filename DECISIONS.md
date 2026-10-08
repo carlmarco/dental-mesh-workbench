@@ -736,3 +736,24 @@ Each entry: the choice, the alternatives considered, and the reason.
   then design (per-tooth labels, or a term that forbids entering a region enclosed by strong creases).
 - Tooling: the interdental test first used per-tooth nearest-point queries, whose search expands across the
   arch for distant points; the run was stopped after 30 min. Replaced by a fixed-radius grid lookup (3 min).
+
+## D84. Visual inspection of interdental misses: a sub-edge gingiva strip between touching crowns
+- Tooling: the viewer gains a kappa_min overlay ("creases") and a dev-server-only URL loader
+  (?scan=&labels=&focus=x,y,z&dist=&overlay=) that loads a local scan, detects the margin, overlays the labelled
+  boundary and frames a point; margin_eval's errors experiment lists the 5 validation scans with the most missed
+  interdental boundary, each with a viewer URL focused on its densest miss cluster.
+- Seen on the two worst scans (QQKBAWLF_lower, JJEIMAPR_upper): between two adjacent crowns there is a narrow, deep
+  valley (strong kappa_min across its whole width). The labels run a strip of gingiva up inside that valley,
+  nearly to the contact point; the method labels the whole valley tooth and crosses at gum level. Handle loops
+  (tunnels) pass beneath such contacts, consistent with crowns bridged by the scan at the contact.
+- Measured (validation, 120 scans): at missed interdental samples, the distance to the neighbouring crown (another
+  FDI label) is q25 0.11, **median 0.17**, q75 0.50 mm; 74.9% are below 0.5 mm. The labelled strip is about one
+  vertex wide, below a typical edge length.
+- Mechanism: in a BINARY tooth/gingiva labelling, two adjacent crowns are both "tooth", so the valley between them
+  needs no boundary; keeping a one-vertex gingiva strip costs two long boundaries, merging costs none. Neither a
+  crease term nor a better unary can express "tooth A | tooth B" in a two-label model. This supersedes the D83
+  working hypothesis (entry at the papilla tip) and explains D82 (Voronoi bridges too).
+- Design implication: per-tooth (multi-label) labelling makes the A|B boundary explicit; it runs along the valley,
+  within 0.5 mm of both labelled strip edges for ~75% of these misses, which would recover most of the ~5.6% of
+  true boundary lost here (upper bound for F1@0.5 roughly +0.03; not yet measured). Prerequisite: grouping cusp
+  seeds into teeth.

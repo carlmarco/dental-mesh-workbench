@@ -52,6 +52,7 @@ export interface MeshData {
   indices: Uint32Array; // 3 per face
   mean: Float32Array; // per vertex, NaN = no data
   gaussian: Float32Array; // per vertex, NaN = no data
+  kmin: Float32Array; // min principal curvature per vertex (creases < 0), NaN = no data
   faceComponent: Uint32Array; // per face, 0xFFFFFFFF = excluded
   boundaryEdges: Uint32Array; // vertex pairs
   nonmanifoldEdges: Uint32Array;
@@ -166,6 +167,7 @@ export class Dmw {
       indices: (s.indices() as Uint32Array).slice(),
       mean: (s.mean() as Float32Array).slice(),
       gaussian: (s.gaussian() as Float32Array).slice(),
+      kmin: (s.kmin() as Float32Array).slice(),
       faceComponent: (s.faceComponent() as Uint32Array).slice(),
       boundaryEdges: (s.boundaryEdges() as Uint32Array).slice(),
       nonmanifoldEdges: (s.nonmanifoldEdges() as Uint32Array).slice(),

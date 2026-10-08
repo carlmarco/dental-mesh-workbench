@@ -291,4 +291,37 @@ const applyTheme = () => viewer.setBackground(getComputedStyle(document.document
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
 applyTheme();
 
-run(() => dmw.generate("plate_handle"));
+// Local inspection (dev server only, D84): ?scan=<abs path .obj>&labels=<abs path .json>&focus=x,y,z[&dist=mm]
+// loads a scan from the git-ignored data folder, detects the margin, overlays the labelled boundary and frames
+// the given point. Vite serves files outside the web root under /@fs (allowed in vite.config.ts).
+async function inspectFromUrl(): Promise<boolean> {
+  const q = new URLSearchParams(location.search);
+  const scan = q.get("scan");
+  if (!scan) return false;
+  try {
+    const bytes = new Uint8Array(await (await fetch(`/@fs${scan}`)).arrayBuffer());
+    display(dmw.loadFile(bytes, "obj"), false);
+    const r = dmw.detectMargin();
+    marginEdges = r.edges;
+    marginInfo = `${r.edges.length / 2} margin edges in ${r.millis.toFixed(0)} ms`;
+    viewer.setMargin(marginEdges, null);
+    const labelsPath = q.get("labels");
+    if (labelsPath) {
+      const labels = ((await (await fetch(`/@fs${labelsPath}`)).json()) as { labels: number[] }).labels;
+      const { metrics: m, truthEdges } = dmw.compareMargin(Uint8Array.from(labels, (l) => (l !== 0 ? 1 : 0)));
+      marginInfo += ` · vs labels: ASSD ${m.assd.toFixed(3)} mm, HD95 ${m.hd95.toFixed(2)} mm, F1@0.5 ${m.f1_050.toFixed(2)}, IoU ${m.iou.toFixed(3)}`;
+      viewer.setMargin(marginEdges, truthEdges);
+    }
+    const ov = q.get("overlay");
+    if (ov) document.querySelector<HTMLInputElement>(`input[name="overlay"][value="${ov}"]`)!.checked = true;
+    display(data!, true);
+    const f = q.get("focus")?.split(",").map(Number);
+    if (f && f.length === 3) viewer.focus([f[0], f[1], f[2]], Number(q.get("dist") ?? 12));
+    return true;
+  } catch (e) {
+    errorBox.textContent = `Could not inspect: ${(e as Error).message}`;
+    return false;
+  }
+}
+
+if (!(await inspectFromUrl())) run(() => dmw.generate("plate_handle"));

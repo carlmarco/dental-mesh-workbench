@@ -15,6 +15,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -275,7 +277,18 @@ struct ErrorStats {
     std::vector<double> kp_ring[2][2];  // PREDICTED boundary edges: [interdental][> 1 mm from the true line]
     // Precision misses (predicted samples > 0.5 mm from the true line), by the predicted-tooth vertex beside them:
     std::size_t pr_samples = 0, p_fake = 0, p_near = 0, p_far = 0;  // fake: that vertex is gingiva > 0.5 mm from any tooth
+    // D84: per-scan worst cases for visual inspection: missed interdental true samples, and the densest one.
+    struct Case {
+        std::size_t missed;
+        std::string obj, labels;
+        Vec3 focus;
+    };
+    std::vector<Case> cases;
+    // D84: width of the labelled gingiva strip at missed interdental samples: distance from the sample to the
+    // nearest vertex of a tooth OTHER than the one beside it (the neighbouring crown across the gap).
+    std::vector<double> strip_width;
 };
+std::string g_scan_obj, g_scan_labels;  // the scan being evaluated (for the inspection list)
 ErrorStats g_errors;
 void error_breakdown(const HalfEdgeMesh& m, const MarginInputs& in, std::span<const std::uint8_t> tooth,
                      std::span<const std::uint8_t> truth, const std::vector<int>& fdi, std::span<const double> area) {
@@ -381,6 +394,39 @@ void error_breakdown(const HalfEdgeMesh& m, const MarginInputs& in, std::span<co
             const int inter = teeth_near(pr_pts[k]) >= 2, far = pr_to_gt[k] > 1.0;
             g_errors.kp_ring[inter][far].push_back(ring_min(pr_edges[k].v0, pr_edges[k].v1));
         }
+        std::vector<Vec3> missed_inter;
+        for (std::size_t k = 0; k < gt_edges.size(); ++k) {
+            if (near_teeth[k] < 2 || gt_to_pr[k] <= 0.5) continue;
+            missed_inter.push_back(gt_pts[k]);
+            const int own = fdi[truth[gt_edges[k].v0] ? gt_edges[k].v0 : gt_edges[k].v1];
+            const Key c = key(gt_pts[k]);
+            double best = std::numeric_limits<double>::infinity();
+            for (std::int64_t dx = -1; dx <= 1; ++dx)
+                for (std::int64_t dy = -1; dy <= 1; ++dy)
+                    for (std::int64_t dz = -1; dz <= 1; ++dz) {
+                        const auto it = grid.find({c[0] + dx, c[1] + dy, c[2] + dz});
+                        if (it == grid.end()) continue;
+                        for (std::uint32_t v : it->second) {
+                            if (fdi[v] == own) continue;
+                            const Vec3 d{m.positions[v].x - gt_pts[k].x, m.positions[v].y - gt_pts[k].y, m.positions[v].z - gt_pts[k].z};
+                            best = std::min(best, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
+                        }
+                    }
+            g_errors.strip_width.push_back(best);  // <= 1.5 mm by construction (interdental test)
+        }
+        if (!missed_inter.empty()) {
+            // Focus = the missed interdental sample with the most others within 2 mm (brute force; small sets).
+            std::size_t best = 0, best_n = 0;
+            for (std::size_t i = 0; i < missed_inter.size(); i += 4) {
+                std::size_t n = 0;
+                for (const Vec3& q : missed_inter) {
+                    const Vec3 d{q.x - missed_inter[i].x, q.y - missed_inter[i].y, q.z - missed_inter[i].z};
+                    n += d.x * d.x + d.y * d.y + d.z * d.z < 4.0;
+                }
+                if (n > best_n) best = i, best_n = n;
+            }
+            g_errors.cases.push_back({missed_inter.size(), g_scan_obj, g_scan_labels, missed_inter[best]});
+        }
         for (std::size_t k = 0; k < gt_edges.size(); ++k) {
             const std::uint32_t a = gt_edges[k].v0, b = gt_edges[k].v1;
             const double ring = ring_min(a, b);
@@ -459,6 +505,7 @@ int main(int argc, char** argv) {
             if (!parr) { ++no_prediction; continue; }
             for (const JsonValue& x : parr->array) external.push_back(x.number != 0.0 ? 1 : 0);
         }
+        g_scan_obj = std::filesystem::absolute(obj).string(), g_scan_labels = std::filesystem::absolute(lab->second).string();
         const JsonResult j = parse_json(dataset::read_text(lab->second));
         const LoadResult r = parse_obj(dataset::read_text(obj));
         const JsonValue* arr = j.ok() ? j.value.find("labels") : nullptr;
@@ -595,6 +642,15 @@ int main(int argc, char** argv) {
                             q(e.k_ring[i][j], 0.5), q(e.k_ring[i][j], 0.25), 100.0 * frac_below(e.k_ring[i][j], -1.0));
         std::printf("  %-34s %8zu %10.2f %10s %12s %13.1f%%\n", "baseline: true gingiva vertices", e.k_gingiva.size(), q(e.k_gingiva, 0.5),
                     "-", "-", 100.0 * frac_below(e.k_gingiva, -1.0));
+        std::printf("\nmissed interdental samples: distance to the neighbouring crown (gingiva strip width): q25 %.2f, median %.2f,"
+                    " q75 %.2f mm; < 0.5 mm: %.1f%%\n", q(e.strip_width, 0.25), q(e.strip_width, 0.5), q(e.strip_width, 0.75),
+                    100.0 * frac_below(e.strip_width, 0.5));
+        auto cases = e.cases;
+        std::sort(cases.begin(), cases.end(), [](const auto& x, const auto& y) { return x.missed > y.missed; });
+        std::printf("\nworst scans by missed interdental boundary samples (viewer: npm run dev, then open the URL):\n");
+        for (std::size_t i = 0; i < std::min<std::size_t>(cases.size(), 5); ++i)
+            std::printf("  %zu missed  http://localhost:5173/?scan=%s&labels=%s&focus=%.2f,%.2f,%.2f&dist=10\n", cases[i].missed,
+                        cases[i].obj.c_str(), cases[i].labels.c_str(), cases[i].focus.x, cases[i].focus.y, cases[i].focus.z);
         std::printf("  PREDICTED boundary (ring min kappa_min):\n");
         const char* pnames[2][2] = {{"cheek/tongue side, within 1 mm", "cheek/tongue side, > 1 mm off"}, {"interdental, within 1 mm", "interdental, > 1 mm off"}};
         for (int i = 0; i < 2; ++i)

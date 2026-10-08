@@ -7,7 +7,7 @@ import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js
 import { categorical, diverging, NO_DATA, robustRange, type RGB, sequential } from "./colormap.ts";
 import type { MeshData } from "./dmw.ts";
 
-export type Overlay = "shaded" | "mean" | "gaussian" | "components" | "geodesic";
+export type Overlay = "shaded" | "mean" | "gaussian" | "kmin" | "components" | "geodesic";
 
 export interface Layers {
   boundary: boolean;
@@ -177,7 +177,7 @@ export class Viewer {
     } else {
       const nv = d.positions.length / 3;
       const col = new Float32Array(nv * 3);
-      const field = overlay === "mean" ? d.mean : overlay === "gaussian" ? d.gaussian : null;
+      const field = overlay === "mean" ? d.mean : overlay === "gaussian" ? d.gaussian : overlay === "kmin" ? d.kmin : null;
       if (field) range = robustRange(field);
       for (let v = 0; v < nv; ++v) {
         const x = field ? field[v] : 0;
@@ -286,6 +286,16 @@ export class Viewer {
     const lines = new LineSegments2(geometry, material);
     if (onTop) lines.renderOrder = 1; // draw after the mesh
     this.content.add(lines);
+  }
+
+  // Look at `center` from `distance` away (inspection of a region; keeps the default viewing direction).
+  focus(center: [number, number, number], distance: number): void {
+    const c = new THREE.Vector3(...center);
+    this.controls.target.copy(c);
+    this.camera.position.copy(c).add(new THREE.Vector3(0.35, -1, 0.75).normalize().multiplyScalar(distance));
+    this.camera.near = distance / 100;
+    this.camera.far = distance * 100;
+    this.camera.updateProjectionMatrix();
   }
 
   private frame(): void {
