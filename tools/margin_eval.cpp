@@ -48,9 +48,9 @@ struct Config {
             std::snprintf(b, sizeof b, "GraphCut mu=%.2f beta=%.0f alpha=%.0f tq=%.2f islands<%.0f%s", p.cut_smoothness, p.cut_crease,
                           p.valley_weight, p.tooth_quantile, p.min_tooth_region, p.seed_model ? " + classifier" : "");
         else if (p.method == Method::PerToothCut)
-            std::snprintf(b, sizeof b, "PerToothCut tau=%s strip<%s R=%.0f%s", p.group_crease >= 1e8 ? "none" : std::to_string(p.group_crease).substr(0, 5).c_str(),
+            std::snprintf(b, sizeof b, "PerToothCut tau=%s strip<%s R=%.0f label_r=%.0f%s", p.group_crease >= 1e8 ? "none" : std::to_string(p.group_crease).substr(0, 5).c_str(),
                           p.strip_kmin < -1e8 ? "off" : std::to_string(p.strip_kmin).substr(0, 4).c_str(), p.expansion_radius,
-                          p.seed_model ? " + classifier" : "");
+                          p.label_radius, p.seed_model ? " + classifier" : "");
         else if (p.cusp_seed_quantile == kHeightOracle) std::snprintf(b, sizeof b, "ORACLE: height seeds on true gingiva removed (+clf)");
         else if (p.cusp_seed_quantile == kBothOracles) std::snprintf(b, sizeof b, "ORACLE: all tooth seeds on true gingiva removed");
         else if (p.cusp_seed_quantile < 0.0) std::snprintf(b, sizeof b, "ORACLE: cusp seeds on true gingiva removed");
@@ -86,6 +86,7 @@ std::vector<Config> sweep_configs() {
 }
 
 const LogisticModel* g_seed_model = nullptr;  // set from the command line (D76)
+MarginTimings g_timings;  // D86 profile experiment
 
 // Fixed operating points for the test set, from the TRAINING sweeps (60 scans of part 1, 2026-10-06).
 // Edit only from training results, never from test results.
@@ -142,6 +143,30 @@ std::vector<Config> validate_configs() {
     }
     if (g_experiment == "errors") {
         c.push_back({graph_cut(false)});  // D80: where does the per-vertex error of the public method sit?
+        return c;
+    }
+    if (g_experiment == "speed_check") {  // D86: the faster per-tooth cut must reproduce sweep 3 (tau -1.25: 0.272)
+        MarginParams p = graph_cut(false);
+        p.method = Method::PerToothCut, p.group_crease = -1.25;
+        c.push_back({graph_cut(false)});
+        c.push_back({p});
+        return c;
+    }
+    if (g_experiment == "cutoff") {  // D86: per-label Dijkstra cutoff; metrics must not move
+        // A weighted-distance cutoff (5..50) was catastrophic: crease weighting makes distances inside one crown
+        // reach thousands. Now: a straight-line radius around each label's seed tips.
+        for (double rad : {0.0, 20.0, 15.0, 12.0, 9.0}) {
+            MarginParams p = graph_cut(false);
+            p.method = Method::PerToothCut, p.group_crease = -1.25, p.label_radius = rad;
+            c.push_back({p});
+        }
+        return c;
+    }
+    if (g_experiment == "profile") {  // D86: per-stage timing of the public per-tooth cut
+        MarginParams p = graph_cut(false);
+        p.method = Method::PerToothCut, p.group_crease = -1.25;
+        p.timings = &g_timings;
+        c.push_back({p});
         return c;
     }
     if (g_experiment == "pertooth_validate" || g_experiment == "errors_pertooth") {  // D85: chosen tau -1.25, R 3
@@ -753,6 +778,13 @@ int main(int argc, char** argv) {
                             q(e.kp_ring[i][j], 0.5), q(e.kp_ring[i][j], 0.25), 100.0 * frac_below(e.kp_ring[i][j], -1.0));
         std::printf("  precision misses (%.1f%% of predicted samples): fake regions on gingiva %.1f%%, 0.5-1 mm off %.1f%%,"
                     " > 1 mm off (not fake) %.1f%%\n", 100 * p_miss / pg, 100 * e.p_fake / pg, 100 * e.p_near / pg, 100 * e.p_far / pg);
+    }
+    if (g_experiment == "profile" && g_timings.calls) {
+        const double n = double(g_timings.calls);
+        std::printf("\nper-tooth cut, mean ms per scan: seeds %.0f, binary Dijkstras %.0f, binary cut %.0f, grouping %.0f, per-label"
+                    " Dijkstras %.0f, unary %.0f, alpha-expansion %.0f; labels per scan %.1f\n", g_timings.seeds / n,
+                    g_timings.binary_dijkstra / n, g_timings.binary_cut / n, g_timings.grouping / n, g_timings.label_dijkstra / n,
+                    g_timings.unary / n, g_timings.expansion / n, double(g_timings.labels) / n);
     }
     std::printf("\nlabelling time per scan (ms, after shared inputs; native Release):");
     for (const auto& t : totals) std::printf(" %.0f", t.label_ms / double(std::max<std::size_t>(used, 1)));

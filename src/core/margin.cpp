@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -221,6 +222,15 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
         for (std::size_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && in.height[v] >= cut) ? 1 : 0;
         return tooth;
     }
+    using Clock = std::chrono::steady_clock;
+    auto t_last = Clock::now();
+    auto lap = [&](double MarginTimings::*field) {
+        if (!p.timings) return;
+        const auto now = Clock::now();
+        p.timings->*field += std::chrono::duration<double, std::milli>(now - t_last).count();
+        t_last = now;
+    };
+    if (p.timings) ++p.timings->calls;
     // Seeds: 1 tooth, 0 gingiva, 2 unlabelled.
     std::vector<std::uint8_t> label(nv, 2);
     const double low = q(p.gingiva_quantile), high = q(p.tooth_quantile);
@@ -258,7 +268,9 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     };
     // Multi-source Dijkstra over the arch from the vertices with label[v] in `sources`; `owner` records
     // which seed label each vertex was reached from (first arrival).
-    auto arrival = [&](auto is_source, std::vector<double>& dist, std::vector<std::uint8_t>* owner) {
+    // `within(w)`: an optional spatial limit on which vertices the search may visit (PerToothCut, D86).
+    auto arrival = [&](auto is_source, std::vector<double>& dist, std::vector<std::uint8_t>* owner,
+                       const std::function<bool(std::uint32_t)>& within = {}) {
         dist.assign(nv, std::numeric_limits<double>::infinity());
         using Item = std::pair<double, std::uint32_t>;
         std::priority_queue<Item, std::vector<Item>, std::greater<>> heap;
@@ -270,7 +282,7 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
             heap.pop();
             if (d > dist[v]) continue;
             for (std::uint32_t w : one_ring(m, v)) {
-                if (!in.arch[w]) continue;
+                if (!in.arch[w] || (within && !within(w))) continue;
                 const double nd = d + edge_cost(v, w);
                 if (nd < dist[w]) {
                     dist[w] = nd;
@@ -290,9 +302,11 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     }
 
     // GraphCut (D78). Unary terms from the two arrival distances; nodes are the arch vertices.
+    lap(&MarginTimings::seeds);
     std::vector<double> dt, dg;
     arrival([](std::uint8_t l) { return l == 1; }, dt, nullptr);
     arrival([](std::uint8_t l) { return l == 0; }, dg, nullptr);
+    lap(&MarginTimings::binary_dijkstra);
     std::vector<double> area(nv, 0.0), dual(m.origin.size(), 0.0);  // lumped areas; dual length per half-edge
     for (std::uint32_t f = 0; f < m.origin.size() / 3; ++f) {
         const std::array<std::uint32_t, 3> c{m.origin[3 * f], m.origin[3 * f + 1], m.origin[3 * f + 2]};
@@ -344,6 +358,7 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
     }
     g.solve();
     for (std::uint32_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && g.source_side(node[v])) ? 1 : 0;
+    lap(&MarginTimings::binary_cut);
     if (p.method != MarginParams::Method::PerToothCut) {
         remove_small_tooth_regions(m, tooth, p.min_tooth_region);
         return tooth;
@@ -359,6 +374,7 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
         grp = group_cusps(m, seed_tips, tooth, in.kmin, p.group_crease);
     }
     const int groups = grp.empty() ? 0 : *std::max_element(grp.begin(), grp.end()) + 1;
+    lap(&MarginTimings::grouping);
     if (groups < 2) return tooth;  // nothing to separate
     const auto labels = static_cast<std::size_t>(groups) + 1;  // 0 = gingiva, 1..groups = teeth
     std::vector<std::vector<double>> dist(labels);
@@ -372,9 +388,25 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
             if (grp[i] == l - 1) src[seed_tips[i]] = 1, fixed[seed_tips[i]] = l;
         std::vector<std::uint8_t> keep = label;
         for (std::uint32_t v = 0; v < nv; ++v) label[v] = src[v] ? 1 : 2;
-        arrival([](std::uint8_t x) { return x == 1; }, dist[static_cast<std::size_t>(l)], nullptr);
+        std::function<bool(std::uint32_t)> near_seeds;
+        if (p.label_radius > 0.0) {
+            std::vector<Vec3> tips_l;
+            for (std::size_t i = 0; i < seed_tips.size(); ++i)
+                if (grp[i] == l - 1) tips_l.push_back(m.positions[seed_tips[i]]);
+            const double r2 = p.label_radius * p.label_radius;
+            near_seeds = [&m, tips_l, r2](std::uint32_t w) {
+                for (const Vec3& t : tips_l) {
+                    const Vec3 d = m.positions[w] - t;
+                    if (dot(d, d) <= r2) return true;
+                }
+                return false;
+            };
+        }
+        arrival([](std::uint8_t x) { return x == 1; }, dist[static_cast<std::size_t>(l)], nullptr, near_seeds);
         label = std::move(keep);
     }
+    lap(&MarginTimings::label_dijkstra);
+    if (p.timings) p.timings->labels += labels;
     // Unary D_l(v) = -A log p_l, p_l = (1/d_l) / sum_k (1/d_k); hard constraints as kHard.
     std::vector<double> unary(static_cast<std::size_t>(count) * labels, 0.0);
     for (std::uint32_t v = 0; v < nv; ++v) {
@@ -419,35 +451,48 @@ std::vector<std::uint8_t> margin_labels(const HalfEdgeMesh& m, const MarginInput
         if (fixed[v] >= 0) best = static_cast<std::size_t>(fixed[v]);
         f[node[v]] = static_cast<std::uint32_t>(best);
     }
+    lap(&MarginTimings::unary);
     ExpansionCandidates near_label;
     if (p.expansion_radius > 0.0) {
-        // Grid cells of size R: a vertex may take label l if a cell within one step holds a vertex labelled l.
-        std::vector<std::uint32_t> vertex_of(count);
-        for (std::uint32_t v = 0; v < nv; ++v)
-            if (in.arch[v]) vertex_of[node[v]] = v;
+        // Dense grid of cells of size R over the arch: a vertex may take label l if its cell or one of the 26
+        // around it holds a vertex labelled l (occupancy dilated once per move, then one lookup per vertex).
         const double r = p.expansion_radius;
-        using Key = std::array<std::int64_t, 3>;
-        std::vector<Key> cell(count);
-        for (std::uint32_t i = 0; i < count; ++i) {
-            const Vec3& x = m.positions[vertex_of[i]];
-            cell[i] = {static_cast<std::int64_t>(std::floor(x.x / r)), static_cast<std::int64_t>(std::floor(x.y / r)),
-                       static_cast<std::int64_t>(std::floor(x.z / r))};
+        Vec3 lo{1e300, 1e300, 1e300};
+        for (std::uint32_t v = 0; v < nv; ++v)
+            if (in.arch[v]) lo = {std::min(lo.x, m.positions[v].x), std::min(lo.y, m.positions[v].y), std::min(lo.z, m.positions[v].z)};
+        std::array<std::size_t, 3> dim{1, 1, 1};
+        std::vector<std::array<std::size_t, 3>> ijk(count);
+        for (std::uint32_t v = 0; v < nv; ++v) {
+            if (!in.arch[v]) continue;
+            const Vec3 d = m.positions[v] - lo;
+            const std::array<std::size_t, 3> c{static_cast<std::size_t>(d.x / r) + 1, static_cast<std::size_t>(d.y / r) + 1,
+                                               static_cast<std::size_t>(d.z / r) + 1};  // +1: a margin layer for dilation
+            ijk[node[v]] = c;
+            for (std::size_t k = 0; k < 3; ++k) dim[k] = std::max(dim[k], c[k] + 2);
         }
-        near_label = [cell, count](std::uint32_t alpha, const std::vector<std::uint32_t>& lab, std::vector<std::uint8_t>& mask) {
-            std::unordered_map<Key, char, Hash3<std::int64_t>> occupied;
+        std::vector<std::size_t> cell(count);
+        for (std::uint32_t i = 0; i < count; ++i) cell[i] = (ijk[i][2] * dim[1] + ijk[i][1]) * dim[0] + ijk[i][0];
+        near_label = [cell, count, dim](std::uint32_t alpha, const std::vector<std::uint32_t>& lab, std::vector<std::uint8_t>& mask) {
+            const std::size_t cells = dim[0] * dim[1] * dim[2];
+            std::vector<std::uint8_t> occupied(cells, 0), near(cells, 0);
             for (std::uint32_t i = 0; i < count; ++i)
-                if (lab[i] == alpha) occupied.emplace(cell[i], 1);
-            for (std::uint32_t i = 0; i < count; ++i) {
-                bool hit = false;
-                for (std::int64_t dx = -1; dx <= 1 && !hit; ++dx)
-                    for (std::int64_t dy = -1; dy <= 1 && !hit; ++dy)
-                        for (std::int64_t dz = -1; dz <= 1 && !hit; ++dz)
-                            hit = occupied.count({cell[i][0] + dx, cell[i][1] + dy, cell[i][2] + dz}) != 0;
-                mask[i] = hit ? 1 : 0;
+                if (lab[i] == alpha) occupied[cell[i]] = 1;
+            const auto sx = static_cast<std::ptrdiff_t>(1), sy = static_cast<std::ptrdiff_t>(dim[0]),
+                       sz = static_cast<std::ptrdiff_t>(dim[0] * dim[1]);
+            for (std::size_t c = 0; c < cells; ++c) {
+                if (!occupied[c]) continue;
+                for (std::ptrdiff_t dz = -1; dz <= 1; ++dz)
+                    for (std::ptrdiff_t dy = -1; dy <= 1; ++dy)
+                        for (std::ptrdiff_t dx = -1; dx <= 1; ++dx) {
+                            const std::ptrdiff_t n = static_cast<std::ptrdiff_t>(c) + dx * sx + dy * sy + dz * sz;
+                            if (n >= 0 && n < static_cast<std::ptrdiff_t>(cells)) near[static_cast<std::size_t>(n)] = 1;
+                        }
             }
+            for (std::uint32_t i = 0; i < count; ++i) mask[i] = near[cell[i]];
         };
     }
     alpha_expansion(static_cast<std::uint32_t>(labels), unary, pairs, f, p.expansion_sweeps, near_label);
+    lap(&MarginTimings::expansion);
     for (std::uint32_t v = 0; v < nv; ++v) tooth[v] = (in.arch[v] && f[node[v]] != 0) ? 1 : 0;
     // Interdental strip: at tooth|tooth edges along a valley, the deeper vertex becomes gingiva.
     std::vector<std::uint32_t> carve;

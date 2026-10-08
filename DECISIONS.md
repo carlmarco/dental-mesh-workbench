@@ -789,3 +789,19 @@ Each entry: the choice, the alternatives considered, and the reason.
   Validation predicted it (-0.061). Classifier on top: 0.282 (-0.004). Library path agrees.
 - Cost: labelling 0.2 -> 2.2 s per scan native (300-scan mean); in the browser 6.8 s on a 164k-vertex scan, measured
   while another evaluation was running (an upper bound; to be re-measured). Now the public operating point.
+
+## D86. Per-tooth cut speed: profile first, then two changes (one failed approach logged)
+- Instrumented (MarginTimings, diagnostics only). 12 validation scans, labelling 1,715 ms/scan: alpha-expansion
+  897, per-label Dijkstras 635 (17.7 labels per scan, each flooding the whole arch), binary stages 152, rest 26.
+- Expansion: the candidate mask probed a hash map 27 times per node in every move (~50 moves per scan). Replaced
+  by a dense cell grid dilated once per move: expansion 897 -> 450 ms (same run conditions), results identical.
+- Per-label Dijkstras, attempt 1, FAILED: a cutoff on the crease-weighted distance (5-50 mm) destroyed the result
+  (ASSD 0.26 -> 2.7-3.4 mm on all 12 scans): with alpha = 2560 one fissure adds thousands of weighted mm, so the
+  cutoff truncated each tooth's field inside its own crown. The unary only uses ratios; absolute weighted distances
+  have no scale. Attempt 2: each label's search only visits vertices within a straight-line radius of that label's
+  seed tips. Same run: r = 0 1,131 ms, 20 714, **15 657**, 12 622, 9 587 ms; metrics identical (<= 0.001 mm per
+  scan) down to 15, 12 within 0.005, 9 breaks (+0.059). **Default 15 mm.**
+- Check on the 60 sweep scans: 0.274 mm, F1@0.5 0.916 (sweep 3 before the changes: 0.272 / 0.917); paired vs the
+  binary cut -0.049, t = -3.1, better on 55 (unchanged). The radius changes results by ~0.002 mm on average.
+- Net: labelling ~2.6x faster in like-for-like runs (~1.7 s -> ~0.65 s on the 12-scan slice); absolute timings in
+  this session vary +-40% with machine load (a VM was using ~3 cores), so only same-run ratios are quoted.

@@ -32,6 +32,12 @@ namespace dmw {
 //                    down a valley (kappa_min < strip_kmin) its deeper vertex becomes gingiva, the one-vertex
 //                    interdental strip of the labels (D84).
 // Only the largest component (the arch) is labelled; everything else is gingiva.
+// DIAGNOSTICS ONLY (D86): wall time per stage of margin_labels, accumulated across calls (ms).
+struct MarginTimings {
+    double seeds = 0, binary_dijkstra = 0, binary_cut = 0, grouping = 0, label_dijkstra = 0, unary = 0, expansion = 0;
+    std::size_t labels = 0, calls = 0;
+};
+
 struct MarginParams {
     enum class Method { HeightPlane, GeodesicVoronoi, GraphCut, PerToothCut };
     Method method = Method::GeodesicVoronoi;
@@ -46,6 +52,8 @@ struct MarginParams {
     double strip_kmin = -1e300;      // PerToothCut: carve tooth|tooth boundary vertices with kappa_min below this (off:
                                      // every carving variant was worse on the sweep scans, D85)
     int expansion_sweeps = 3;        // PerToothCut: alpha-expansion sweeps over all labels (stops early if stable)
+    double label_radius = 15.0;      // PerToothCut: each per-label Dijkstra only visits vertices within this straight-line
+                                     // distance of that label's seed tips (mm; 0 = whole arch; D86 speed)
     double expansion_radius = 3.0;   // PerToothCut: a move to label l only considers vertices within ~this (mm, grid
                                      // cells) of vertices labelled l (0 = all vertices; D85 speed)
     double min_tooth_region = 0.0;   // relabel tooth components smaller than this area (mm^2) as gingiva (D80)
@@ -56,6 +64,7 @@ struct MarginParams {
     double seed_threshold = 0.5;
     // DIAGNOSTICS ONLY (oracle experiments, D77): vertices flagged 1 may not seed teeth. Null = off.
     const std::vector<std::uint8_t>* tooth_seed_veto = nullptr;
+    MarginTimings* timings = nullptr;  // diagnostics: per-stage wall time (null = off)
 };
 
 struct MarginResult {
