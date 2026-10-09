@@ -49,7 +49,7 @@ reference rather than trusted.
 | Ray casting | BVH (binned SAH), Möller–Trumbore; nearest and any-hit queries | MacDonald & Booth 1990; Wald 2007; Möller & Trumbore 1997 |
 | Manufacturing | Undercut map and best path of insertion; wall thickness by ray cones | Shapira, Shamir & Cohen-Or 2008 (shape diameter function) |
 | Signed distance, offsets | Generalized signed distance on a grid (robust to holes; exact DCT solves), iso-surfaces by marching tetrahedra, offset shells | Feng & Crane 2024 (signed heat method) |
-| Mesh repair | Hole filling: minimum-weight triangulation (dynamic programming), refinement, thin-plate fairing | Liepa 2003; Barequet & Sharir 1995 |
+| Mesh repair | Hole filling: minimum-weight triangulation (dynamic programming), refinement, thin-plate fairing; isotropic remeshing (split, collapse, flip, tangential relaxation, projection) | Liepa 2003; Barequet & Sharir 1995; Botsch & Kobbelt 2004 |
 | Viewer | Overlays for defects, curvature (incl. κ<sub>min</sub> creases), components, undercuts; click-to-pick geodesic isolines; margin detection with label comparison | |
 
 ## Architecture
@@ -183,6 +183,7 @@ data term (D80, D85, D87, D88).
 | Margin labelling time (per-tooth cut) | ~0.65-1.1 s per scan natively after a 2.6× optimization (D86), plus ~1 s of shared inputs; several seconds in the browser |
 | Undercut search | 4.4× faster with coarse-to-fine + threads (D91); ray throughput ~1-4 M rays/s |
 | Hole filling (Liepa 2003), D98 | 1 mm disks punched out of real crowns and filled: patch within 0.088 mm of the removed surface on average (max 0.215 mm, median over 21 scans); every filled scan remains a valid oriented manifold |
+| Isotropic remeshing (Botsch & Kobbelt 2004), D99 | 10 scans at their own mean edge length: topology preserved on 10/10; 10th-percentile minimum angle 22.9° → 41.1°; edge-length CV 2.51 → 0.14; original surface within 0.006 mm mean (0.25 mm max) of the result; ~1 min per scan |
 
 ## Performance
 
@@ -255,7 +256,7 @@ breakdown comes from `dmw_bench`.
 Toolchain used: CMake ≥ 3.24, a C++20 compiler (Apple clang 17 tested), emsdk **6.0.11**, Node 26.
 
 ```bash
-# Native: build and run the tests (179)
+# Native: build and run the tests (187)
 cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure
 
 # Benchmarks (Release build; also writes the meshes the WASM benchmark reads)
@@ -318,6 +319,9 @@ tools in `tools/`.
 - J. D. MacDonald, K. S. Booth. *Heuristics for Ray Tracing Using Space Subdivision.* The Visual Computer 6(3), 1990.
 - I. Wald. *On Fast Construction of SAH-based Bounding Volume Hierarchies.* IEEE Symposium on Interactive Ray
   Tracing, 2007.
+- M. Botsch, L. Kobbelt. *A Remeshing Approach to Multiresolution Modeling.* Eurographics Symposium on Geometry
+  Processing, 2004.
+- C. Ericson. *Real-Time Collision Detection.* Morgan Kaufmann, 2005 (closest point on a triangle, 5.1.5).
 - P. Liepa. *Filling Holes in Meshes.* Eurographics Symposium on Geometry Processing, 2003.
 - G. Barequet, M. Sharir. *Filling Gaps in the Boundary of a Polyhedron.* Computer Aided Geometric Design 12(2), 1995.
 - N. Feng, K. Crane. *A Heat Method for Generalized Signed Distance.* ACM Transactions on Graphics 43(4), 2024.

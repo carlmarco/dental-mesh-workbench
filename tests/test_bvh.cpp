@@ -105,3 +105,31 @@ TEST_CASE("bvh: axis-aligned rays from grid-aligned origins (zero direction comp
         CHECK_THAT(a.t, WithinAbs(1.0, 1e-12));
     }
 }
+
+TEST_CASE("bvh: closest point matches brute force (distance) and lies on the mesh", "[bvh]") {
+    std::mt19937 rng(23);
+    std::uniform_real_distribution<double> u(-2.0, 2.0);
+    for (const TriMesh& m : {make_icosphere(3), make_torus(30, 12, 1.0, 0.35)}) {
+        const Bvh bvh(m.positions, m.triangles);
+        for (int i = 0; i < 1500; ++i) {
+            const Vec3 p{u(rng), u(rng), u(rng)};
+            const ClosestPoint a = bvh.closest(p), b = closest_brute_force(m.positions, m.triangles, p);
+            INFO("query " << i);
+            CHECK_THAT(a.distance, WithinAbs(b.distance, 1e-12));
+            const Vec3 d{a.point.x - p.x, a.point.y - p.y, a.point.z - p.z};
+            CHECK_THAT(std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z), WithinAbs(a.distance, 1e-12));
+        }
+    }
+}
+
+TEST_CASE("bvh: closest point on a triangle in each Voronoi region", "[bvh]") {
+    const Vec3 a{0, 0, 0}, b{1, 0, 0}, c{0, 1, 0};
+    auto near = [](const Vec3& x, const Vec3& y) { return std::abs(x.x - y.x) + std::abs(x.y - y.y) + std::abs(x.z - y.z) < 1e-12; };
+    CHECK(near(closest_point_on_triangle({-1, -1, 2}, a, b, c), a));           // vertex a
+    CHECK(near(closest_point_on_triangle({2, -0.5, 1}, a, b, c), b));          // vertex b
+    CHECK(near(closest_point_on_triangle({-0.5, 2, -1}, a, b, c), c));         // vertex c
+    CHECK(near(closest_point_on_triangle({0.5, -1, 0}, a, b, c), {0.5, 0, 0}));  // edge ab
+    CHECK(near(closest_point_on_triangle({-1, 0.3, 0}, a, b, c), {0, 0.3, 0}));  // edge ac
+    CHECK(near(closest_point_on_triangle({1, 1, 0}, a, b, c), {0.5, 0.5, 0}));   // edge bc
+    CHECK(near(closest_point_on_triangle({0.2, 0.3, 5}, a, b, c), {0.2, 0.3, 0}));  // face
+}

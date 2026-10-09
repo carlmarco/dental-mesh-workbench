@@ -1,4 +1,4 @@
-add_executable(core_tests test_obj.cpp test_stl.cpp test_weld.cpp test_halfedge.cpp test_generate.cpp test_topology.cpp test_curvature.cpp test_sparse.cpp test_dec.cpp test_geodesic.cpp test_cholesky.cpp test_intrinsic.cpp test_io_write.cpp test_handles.cpp test_json_metrics.cpp test_cusps.cpp test_margin.cpp test_learn.cpp test_maxflow.cpp test_multilabel.cpp test_bvh.cpp test_undercut.cpp test_thickness.cpp test_sdf.cpp test_isosurface.cpp test_offset.cpp test_holes.cpp)
+add_executable(core_tests test_obj.cpp test_stl.cpp test_weld.cpp test_halfedge.cpp test_generate.cpp test_topology.cpp test_curvature.cpp test_sparse.cpp test_dec.cpp test_geodesic.cpp test_cholesky.cpp test_intrinsic.cpp test_io_write.cpp test_handles.cpp test_json_metrics.cpp test_cusps.cpp test_margin.cpp test_learn.cpp test_maxflow.cpp test_multilabel.cpp test_bvh.cpp test_undercut.cpp test_thickness.cpp test_sdf.cpp test_isosurface.cpp test_offset.cpp test_holes.cpp test_remesh.cpp)
 
 # Link against the core library plus Catch2 (without its own main()).
 # Catch2WithMain supplies main(), so tests are just TEST_CASEs.

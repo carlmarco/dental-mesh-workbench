@@ -172,6 +172,81 @@ RayHit Bvh::trace(const Vec3& o, const Vec3& d, double t_min, double t_max, std:
     return best;
 }
 
+Vec3 closest_point_on_triangle(const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c) {
+    const Vec3 ab = b - a, ac = c - a, ap = p - a;
+    const double d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0.0 && d2 <= 0.0) return a;  // vertex region a
+    const Vec3 bp = p - b;
+    const double d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0.0 && d4 <= d3) return b;  // vertex region b
+    const double vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) return a + (d1 / (d1 - d3)) * ab;  // edge ab
+    const Vec3 cp = p - c;
+    const double d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0.0 && d5 <= d6) return c;  // vertex region c
+    const double vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) return a + (d2 / (d2 - d6)) * ac;  // edge ac
+    const double va = d3 * d6 - d5 * d4;
+    if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0) return b + ((d4 - d3) / ((d4 - d3) + (d5 - d6))) * (c - b);  // edge bc
+    const double denom = 1.0 / (va + vb + vc);
+    return a + (vb * denom) * ab + (vc * denom) * ac;  // face interior
+}
+
+namespace {
+double box_distance2(const Vec3& lo, const Vec3& hi, const Vec3& p) {
+    const double dx = std::max({lo.x - p.x, 0.0, p.x - hi.x}), dy = std::max({lo.y - p.y, 0.0, p.y - hi.y}),
+                 dz = std::max({lo.z - p.z, 0.0, p.z - hi.z});
+    return dx * dx + dy * dy + dz * dz;
+}
+}  // namespace
+
+ClosestPoint Bvh::closest(const Vec3& p) const {
+    ClosestPoint best;
+    if (nodes_.empty()) return best;
+    double best2 = std::numeric_limits<double>::infinity();
+    std::uint32_t stack[64];
+    int top = 0;
+    stack[top++] = 0;
+    while (top > 0) {
+        const Node& node = nodes_[stack[--top]];
+        if (box_distance2(node.lo, node.hi, p) >= best2) continue;
+        if (node.count > 0) {
+            for (std::uint32_t i = node.first; i < node.first + node.count; ++i) {
+                const std::uint32_t f = order_[i];
+                const Vec3 q = closest_point_on_triangle(p, v0_[f], v0_[f] + e1_[f], v0_[f] + e2_[f]);
+                const Vec3 d = q - p;
+                const double d2 = dot(d, d);
+                if (d2 < best2) best2 = d2, best = {q, 0.0, f};
+            }
+            continue;
+        }
+        // Push the farther child first, so the nearer one is explored (and tightens the bound) first.
+        const std::uint32_t l = node.first, r = node.first + 1;
+        const double dl = box_distance2(nodes_[l].lo, nodes_[l].hi, p), dr = box_distance2(nodes_[r].lo, nodes_[r].hi, p);
+        if (dl <= dr) {
+            if (dr < best2) stack[top++] = r;
+            if (dl < best2) stack[top++] = l;
+        } else {
+            if (dl < best2) stack[top++] = l;
+            if (dr < best2) stack[top++] = r;
+        }
+    }
+    best.distance = std::sqrt(best2);
+    return best;
+}
+
+ClosestPoint closest_brute_force(std::span<const Vec3> pos, std::span<const std::array<std::uint32_t, 3>> tri, const Vec3& p) {
+    ClosestPoint best;
+    double best2 = std::numeric_limits<double>::infinity();
+    for (std::uint32_t f = 0; f < tri.size(); ++f) {
+        const Vec3 q = closest_point_on_triangle(p, pos[tri[f][0]], pos[tri[f][1]], pos[tri[f][2]]);
+        const Vec3 d = q - p;
+        if (dot(d, d) < best2) best2 = dot(d, d), best = {q, 0.0, f};
+    }
+    best.distance = std::sqrt(best2);
+    return best;
+}
+
 RayHit Bvh::intersect(const Vec3& o, const Vec3& d, double t_min, double t_max, std::uint32_t ignore) const {
     return trace<false>(o, d, t_min, t_max, ignore);
 }

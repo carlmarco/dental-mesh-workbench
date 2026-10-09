@@ -64,3 +64,8 @@ target_compile_options(export_demo PRIVATE -Wall -Wextra -Wpedantic -Wconversion
 add_executable(holes_eval holes_eval.cpp)
 target_link_libraries(holes_eval PRIVATE dmw_core)
 target_compile_options(holes_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Isotropic remeshing on scans: quality and fidelity (M10f, D99).
+add_executable(remesh_eval remesh_eval.cpp)
+target_link_libraries(remesh_eval PRIVATE dmw_core)
+target_compile_options(remesh_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)

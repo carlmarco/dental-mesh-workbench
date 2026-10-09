@@ -1055,3 +1055,29 @@ Each entry: the choice, the alternatives considered, and the reason.
   0.349); 1.5 mm disks mean 0.112 mm, max 0.245 mm (worst 0.503). An earlier version of the tool reported 28 mm: it
   measured the patch over the open base cut too, which the default loop limit also fills; the disk is now punched out of
   the scan after its own holes are filled, so it is the only loop the next fill touches.
+
+## D99. M10f (part 2): isotropic remeshing after Botsch & Kobbelt (2004), with a BVH closest-point query
+- core/bvh: closest point on the mesh, boxes visited nearest-first and pruned by their distance lower bound; Ericson's
+  region-based closest point on a triangle. Tests: 3,000 random queries on a sphere and a torus match brute force to
+  1e-12; one query per Voronoi region of a triangle.
+- core/remesh: target edge L (default: the input's mean edge length); per iteration split edges > 4/3 L, collapse edges
+  < 4/5 L when safe (link condition, no new edge > 4/3 L, no face flips or degeneracies, no valence below 3, boundary
+  vertices never pulled inward), flip edges towards valence 6 (4 on the boundary) when the new edge does not exist and
+  both new faces keep their orientation, relax interior vertices tangentially (half a step towards the neighbours'
+  centroid) and project them onto the original surface. Boundary vertices stay fixed (Botsch & Kobbelt also relax them
+  along the boundary; not done here, which limits triangles touching the boundary).
+- Tests: sphere (closed genus 0 kept, every vertex on the input surface, 85% of edges within [4/5 L, 4/3 L]); torus
+  genus 1 kept; a plate with two holes keeps its three boundaries, stays planar, and every boundary vertex stays on the
+  input boundary; aggressive coarsening (sphere and two tori, a handful of vertices left) stays a valid manifold of the
+  same genus with no degenerate faces; a sheared 30 x 30 grid: interior 10th-percentile minimum angle 3.0 -> 31.8 deg on
+  ARM, 29.5 on x86 (27.9 / 27.5 counting the triangles on the fixed boundary). The first threshold (30 deg) sat right at
+  the ARM value and failed in the x86 pre-push container: rounding changes which collapses and flips fire. Now 25 deg.
+- Mutants: 7 tried. Killed: no projection, wrong split orientation, and (after the coarsening and boundary tests were
+  added) no link condition, no flip check on collapse, boundary vertices relaxed. Surviving, kept as required guards:
+  a flip creating an edge that already exists, and the orientation check on flips; the valence rule never proposes
+  such flips on the test meshes.
+- Scans (tools/remesh_eval; 20 sampled part-1 scans, 10 manifold, at their own mean edge length): 10 of 10 valid oriented
+  manifolds with the same components, genus and boundary loops; 10th-percentile minimum angle 22.9 -> 41.1 deg; edge
+  length CV 2.51 -> 0.14 (scans are strongly adaptive); faces x1.94; original vertices to the remeshed surface: mean
+  0.006 mm, max 0.25 mm (medians over scans). Slow: median 61 s per scan (set-based neighbour queries rebuilt for
+  every operation); a half-edge implementation with local updates is the upgrade path.
