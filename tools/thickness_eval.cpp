@@ -3,7 +3,9 @@
 // moved inward by a nominal thickness along the vertex normals (orientation flipped), and a side wall along the
 // boundary. The thickness check then shows where this naive offset fails (concave regions fold the inner surface),
 // the motivation for offsets from a signed distance field (M10d-e).
-//   thickness_eval <scan-dir> [stride] [nominal_mm]
+//   thickness_eval <scan-dir> [stride] [nominal_mm] [sdf]
+// sdf (D95): the shell is built from the crown's generalized signed distance (signed heat method, M10d) instead:
+// outer wall = the phi = 0 iso-surface, inner wall = phi = -nominal, flipped; both closed, no stitching.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -13,7 +15,10 @@
 #include <vector>
 
 #include "core/bvh.h"
+#include "core/isosurface.h"
+#include "core/sdf.h"
 #include "core/io.h"
+#include "core/margin.h"
 #include "core/thickness.h"
 #include "dataset.h"
 
@@ -97,6 +102,7 @@ int main(int argc, char** argv) {
     }
     const std::size_t stride = argc > 2 ? std::stoul(argv[2]) : 30;
     const double nominal = argc > 3 ? std::stod(argv[3]) : 0.8;
+    const bool sdf = argc > 4 && std::string(argv[4]) == "sdf";
     const auto objs = dataset::index_files({argv[1]}, ".obj");
     const auto labels = dataset::index_files({argv[1]}, ".json");
     struct PerType {
@@ -122,7 +128,30 @@ int main(int argc, char** argv) {
         for (const auto& [fdi, faces] : crowns) {
             std::size_t outer = 0;
             std::vector<std::uint8_t> near_rim;
-            const TriMesh shell = naive_shell(r.mesh, faces, nominal, outer, near_rim);
+            TriMesh shell = naive_shell(r.mesh, faces, nominal, outer, near_rim);
+            if (sdf) {
+                // Same crown, SDF shell. Measure on outer-wall vertices that lie on the original crown surface (within
+                // 0.1 mm of its vertices) and more than 1 mm from its rim, matching the naive rows.
+                TriMesh crown;
+                crown.positions.assign(shell.positions.begin(), shell.positions.begin() + static_cast<std::ptrdiff_t>(outer));
+                for (std::size_t f = 0; f < faces.size(); ++f) crown.triangles.push_back(shell.triangles[f]);
+                std::vector<Vec3> rim_pts, crown_pts;
+                for (std::size_t v = 0; v < outer; ++v) (near_rim[v] ? rim_pts : crown_pts).push_back(crown.positions[v]);
+                SignedHeatParams prm;
+                prm.h = 0.12, prm.padding = 2.5;
+                const Grid3 phi = signed_heat_distance(crown, prm);
+                TriMesh outer_wall = extract_isosurface(phi, 0.0), inner_wall = extract_isosurface(phi, -nominal);
+                for (auto& t : inner_wall.triangles) std::swap(t[1], t[2]);  // normals out of the solid (into the hollow)
+                shell = outer_wall;
+                const auto offset = static_cast<std::uint32_t>(shell.positions.size());
+                shell.positions.insert(shell.positions.end(), inner_wall.positions.begin(), inner_wall.positions.end());
+                for (auto t : inner_wall.triangles) shell.triangles.push_back({t[0] + offset, t[1] + offset, t[2] + offset});
+                outer = outer_wall.positions.size();
+                const auto to_crown = nearest_point_distances(outer_wall.positions, crown_pts, 0.5);
+                const auto to_rim = nearest_point_distances(outer_wall.positions, rim_pts, 0.5);
+                near_rim.assign(outer, 0);
+                for (std::size_t v = 0; v < outer; ++v) near_rim[v] = to_crown[v] > 0.1 || to_rim[v] < 0.1 ? 1 : 0;  // excluded
+            }
             const auto t0 = Clock::now();
             const Bvh bvh(shell.positions, shell.triangles);
             ThicknessParams prm;
@@ -147,7 +176,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "\r%zu scans, %zu teeth", scans, teeth);
     }
     std::fprintf(stderr, "\n");
-    std::printf("naive %.2f mm shells from %zu crowns on %zu scans; thickness throughput median %.2f M rays/s (all threads)\n\n", nominal,
+    std::printf("%s %.2f mm shells from %zu crowns on %zu scans; thickness throughput median %.2f M rays/s (all threads)\n\n",
+                sdf ? "signed-distance" : "naive", nominal,
                 teeth, scans, median(rays_per_s) / 1e6);
     std::printf("outer vertices more than 1 mm from the crown rim only\n");
     std::printf("| tooth type | crowns | thinner than 95%% of nominal, cone minimum (median %%) | same, normal ray only (median %%) | minimum wall (median mm) | ms per crown (BVH + thickness) |\n");

@@ -960,3 +960,34 @@ Each entry: the choice, the alternatives considered, and the reason.
   Unit cube (sharp edges): t = h^2 h 0.04 0.0168, 0.02 0.0084 (first order, edges rounded); t = 4h^2 0.0271, 0.0144.
   No sign errors in any run. **Default t = h^2** (the paper's default; teeth have creases), trade-off documented.
   Timing: 42 ms at 67^3, ~360 ms at 117^3 (native, threaded).
+
+## D95. M10e: iso-surfaces by marching tetrahedra; offset shells from the signed distance beat naive offsets
+- core/isosurface: marching tetrahedra on the Kuhn (Freudenthal) subdivision of each grid cube (6 tetrahedra along the
+  main diagonal; consistent between neighbouring cubes, so the surface is watertight with no ambiguous cases).
+  Vertices interpolated on grid edges and shared by edge key; faces oriented along the exact gradient of the linear
+  interpolant in each tetrahedron.
+- Two bugs found by the tests: (1) orienting by a centroid difference (negative corners -> positive corners) can point
+  the wrong way in a slanted tetrahedron; replaced by the exact tetrahedron gradient. (2) Where the field equals the
+  iso value exactly at a grid node (a sphere whose radius passes through nodes), every incident edge created its own
+  vertex at that node: coincident vertices, zero-area triangles of undefined orientation, a non-manifold result.
+  Such crossings now share one vertex keyed by the node. Zero-area faces from crossings that round onto a node remain
+  (162 on a 61^3 sphere) and are kept, since removing them would open the surface; downstream tools skip them.
+- Tests: analytic sphere field at iso 0 and 0.2 (one closed genus-0 manifold, half-edge build succeeds, vertices on
+  the radius within 0.01 at h = 0.05, signed volume = (4/3) pi r^3, i.e. outward normals); torus field (genus 1);
+  offsets of a mesh sphere through the signed heat distance at +0.2 and -0.3 (mean radius within 0.01, genus 0).
+  4 mutants killed (orientation reversed, no vertex sharing, an inconsistent Kuhn tetrahedron, a wrong quad split).
+- Application: crown shells. Same 71 crowns (5 part-1 scans), nominal wall 0.8 mm, same thickness check (D92) on the
+  outer-wall vertices that lie on the crown surface and > 1 mm from its rim. Naive shell (vertices moved along normals,
+  D92) vs SDF shell (outer wall = phi = 0 of the crown's generalized signed distance, which also closes the open
+  crown; inner wall = phi = -0.8; grid h = 0.12 mm):
+
+  | tooth type | crowns | surface thinner than 0.76 mm: naive -> SDF | thinnest wall (median): naive -> SDF |
+  |---|---:|---:|---:|
+  | incisors | 20 | 4.3% -> 0.2% | 0.443 -> 0.758 mm |
+  | canines | 10 | 0.7% -> 0.0% | 0.661 -> 0.765 mm |
+  | premolars | 20 | 2.3% -> 0.0% | 0.561 -> 0.760 mm |
+  | molars | 21 | 2.5% -> 0.0% | 0.598 -> 0.769 mm |
+
+  The SDF shell keeps ~95% of the nominal wall everywhere (the remainder is grid error at h = 0.12 mm); where the crown
+  is thinner than twice the wall, the inner offset simply vanishes and the region is solid instead of folding. Cost:
+  ~3 s per crown for the distance field, extraction and check (native, threaded) vs ~40 ms for the naive shell.

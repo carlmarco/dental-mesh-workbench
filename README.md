@@ -42,6 +42,7 @@ reference rather than trusted.
 | Dental: margin | Tooth-gingiva labelling: concavity-weighted geodesic seeds, graph cut with crease-aware boundary costs, then per-tooth multi-label cut | Price, Morse & Cohen 2010 (geodesic graph cut) |
 | Ray casting | BVH (binned SAH), Möller–Trumbore; nearest and any-hit queries | MacDonald & Booth 1990; Wald 2007; Möller & Trumbore 1997 |
 | Manufacturing | Undercut map and best path of insertion; wall thickness by ray cones | Shapira, Shamir & Cohen-Or 2008 (shape diameter function) |
+| Signed distance, offsets | Generalized signed distance on a grid (robust to holes; exact DCT solves), iso-surfaces by marching tetrahedra, offset shells | Feng & Crane 2024 (signed heat method) |
 | Viewer | Overlays for defects, curvature (incl. κ<sub>min</sub> creases), components, undercuts; click-to-pick geodesic isolines; margin detection with label comparison | |
 
 ## Architecture
@@ -170,7 +171,7 @@ data term (D80, D85, D87, D88).
 | Cusp tips (held-out 3DTeethLand test set, 100 scans, 2,343 landmarks) | F1 **0.631** at 1 mm (precision 0.553, recall 0.736); median error **0.44 mm**; raw-curvature baseline F1 0.112 |
 | Scan topology (median 106k vertices) | only 9/100 arches are genus 0; handle-loop count = 2·Σg on every scan |
 | Undercut / best path of insertion, 263 natural crowns (D90) | undercut along the occlusal axis → best axis within 25°: incisors 23.8% → 8.0%, canines 11.9% → 1.4%, premolars 8.1% → 5.0%, molars 5.5% → 1.1% (medians) |
-| Wall thickness of naive 0.8 mm offset shells, 133 crowns (D92) | thinnest wall median 0.43 mm (incisors) to 0.61 mm (canines): moving vertices along normals is not a safe offset |
+| Offset shells, 0.8 mm wall, same 71 crowns (D92, D95) | moving vertices along normals: thinnest wall 0.44-0.66 mm (median by tooth type); offsetting the generalized signed distance (signed heat method) instead: 0.76-0.77 mm, i.e. the nominal wall within grid error |
 | Cusp detection time, 93.6k-vertex scan | 383 ms native, 459 ms in the browser (WASM), after a 4-8× optimization (D70) |
 | Margin labelling time (per-tooth cut) | ~0.65-1.1 s per scan natively after a 2.6× optimization (D86), plus ~1 s of shared inputs; several seconds in the browser |
 | Undercut search | 4.4× faster with coarse-to-fine + threads (D91); ray throughput ~1-4 M rays/s |
@@ -231,8 +232,8 @@ breakdown comes from `dmw_bench`.
 - **Per-tooth labelling is slower** than the binary cut: ~0.65-1.1 s of labelling per scan natively (0.2 s for the
   binary cut), several seconds in the browser on a large scan.
 - **The Teeth3DS split is per jaw,** so some test patients have their other jaw in the training data (D81).
-- **The undercut and thickness results are on natural crowns,** not crown preparations, and the thickness study uses
-  naive offset shells built for the purpose; offsets from a signed distance field are the next step (ROADMAP M10d-e).
+- **The undercut and thickness results are on natural crowns,** not crown preparations; the offset shells are a
+  demonstration of the geometry, not restoration design (no margin, cement gap or occlusal adjustment).
 - **"Margin" here is the tooth-gingiva boundary on unprepared arches,** not the finish line of a crown
   preparation that restoration design needs; related problems, not the same one.
 - **Cusp detection over-detects on anterior teeth:** incisal edges score as tips but carry no cusp
@@ -246,7 +247,7 @@ breakdown comes from `dmw_bench`.
 Toolchain used: CMake ≥ 3.24, a C++20 compiler (Apple clang 17 tested), emsdk **6.0.11**, Node 26.
 
 ```bash
-# Native: build and run the tests (164)
+# Native: build and run the tests (170)
 cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure
 
 # Benchmarks (Release build; also writes the meshes the WASM benchmark reads)
@@ -309,6 +310,7 @@ tools in `tools/`.
 - J. D. MacDonald, K. S. Booth. *Heuristics for Ray Tracing Using Space Subdivision.* The Visual Computer 6(3), 1990.
 - I. Wald. *On Fast Construction of SAH-based Bounding Volume Hierarchies.* IEEE Symposium on Interactive Ray
   Tracing, 2007.
+- N. Feng, K. Crane. *A Heat Method for Generalized Signed Distance.* ACM Transactions on Graphics 43(4), 2024.
 - L. Shapira, A. Shamir, D. Cohen-Or. *Consistent Mesh Partitioning and Skeletonisation Using the Shape Diameter
   Function.* The Visual Computer 24(4), 2008.
 - A. Ben-Hamadou et al. *Teeth3DS: a Benchmark for Teeth Segmentation and Labeling from Intra-oral 3D Scans.*
