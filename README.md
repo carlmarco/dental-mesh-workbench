@@ -1,13 +1,20 @@
 # Mesh Inspection Workbench
 
-A C++20 geometry-processing core, compiled natively and to WebAssembly, with a Three.js viewer. It inspects
-triangle meshes for topological defects and computes discrete curvature and geodesic distance, implementing
-four papers and verifying each against exact identities, closed-form solutions and measured convergence.
+A geometry-processing core in C++20, compiled natively and to WebAssembly, with a Three.js viewer. It started as
+mesh inspection (topology, curvature, geodesics) and grew into a training-free **tooth-gingiva segmentation of
+intraoral scans** plus manufacturing-oriented inspection (undercuts along a path of insertion, wall thickness).
+Every algorithm is written from scratch and checked against an independent reference: closed forms, convergence
+under refinement, brute force, or mutation tests.
+
+**Headline result.** On 299 held-out Teeth3DS scans that played no part in development, the tooth-gingiva boundary
+lands **0.285 mm** from the labelled one on average (ASSD; median 0.219 mm), with boundary F1 **0.906** at 0.5 mm and
+tooth IoU **0.936**. The first working version measured 0.551 mm / 0.815; each step in between came from measuring
+why the previous one failed ([case study](docs/CASE_STUDY.md), [all decisions](DECISIONS.md)).
 
 **Live demo:** published by the GitHub Pages workflow in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 (`https://<user>.github.io/<repo>/` once the repository is pushed and Pages is set to "GitHub Actions").
-All demo meshes are generated in code. Files you open in the viewer are processed locally in your browser
-and never uploaded.
+The demo meshes are generated in code. Files you open in the viewer are processed locally in your browser and
+never uploaded; no dental scans are hosted (their licence does not allow it).
 
 ## What it does
 
@@ -20,8 +27,12 @@ and never uploaded.
 | Distance | Heat-method geodesics on DEC operators (L = −d₀ᵀ⋆₁d₀), hand-written sparse LDLᵀ; Dijkstra baseline | Crane, Weischedel, Wardetzky 2013 |
 | Handles | Homology handle loops (2g per component) via tree-cotree with the greedy shortest system of loops; boundaries capped | Eppstein 2003; Erickson & Whittlesey 2005 |
 | Robustness | Intrinsic Delaunay Laplacian via intrinsic edge flips: all cotan weights ≥ 0 | Bobenko & Springborn 2007; Fisher, Springborn, Bobenko, Schröder 2007 |
-| Dental scans | Cusp-tip detection by occlusal prominence; tooth-gingiva margin by concavity-weighted geodesic Voronoi; evaluated on held-out Teeth3DS / 3DTeethLand data | |
-| Viewer | Overlays for defects, curvature, components, and click-to-pick geodesic isolines; cotan vs intrinsic Delaunay toggle | |
+| Optimization | s-t max-flow / min-cut; multi-label Potts energies by alpha-expansion (with optional star-shape constraints) | Boykov & Kolmogorov 2004; Boykov, Veksler & Zabih 2001; Kolmogorov & Zabih 2004; Veksler 2008 |
+| Dental: cusps | Cusp tips by occlusal prominence (diffused height, non-maximum suppression) | |
+| Dental: margin | Tooth-gingiva labelling: concavity-weighted geodesic seeds, graph cut with crease-aware boundary costs, then per-tooth multi-label cut | Price, Morse & Cohen 2010 (geodesic graph cut) |
+| Ray casting | BVH (binned SAH), Möller–Trumbore; nearest and any-hit queries | MacDonald & Booth 1990; Wald 2007; Möller & Trumbore 1997 |
+| Manufacturing | Undercut map and best path of insertion; wall thickness by ray cones | Shapira, Shamir & Cohen-Or 2008 (shape diameter function) |
+| Viewer | Overlays for defects, curvature (incl. κ<sub>min</sub> creases), components, undercuts; click-to-pick geodesic isolines; margin detection with label comparison | |
 
 ## Architecture
 
@@ -86,10 +97,24 @@ weight becomes non-negative.
 *Verified:* flipped connectivity equals a from-scratch half-edge rebuild; area and every cone angle are
 preserved; Euclidean lengths reproduce the extrinsic operators to 1e-12.
 
+**Graph cuts (Boykov & Kolmogorov 2004; Boykov, Veksler & Zabih 2001).** Max-flow by the two-search-tree
+algorithm; multi-label Potts energies by alpha-expansion, each move an exact s-t cut via the Kolmogorov-Zabih
+construction, optionally with star-shape constraints (Veksler 2008).
+*Verified:* max-flow = brute-force min cut on random graphs and = Edmonds-Karp on larger sparse ones, with the cut
+value of the returned labels as a certificate; alpha-expansion never raises the energy, ends in a local minimum
+over all expansion moves (exhaustive check) and stays within 2× the optimum (the Potts bound) on brute-forced
+problems; star constraints hold throughout.
+
+**Ray casting.** BVH with the binned surface-area heuristic, near-child-first traversal, Möller-Trumbore tests.
+*Verified:* identical hits and distances (1e-12) to brute force on random rays over spheres, a torus and a random
+triangle soup, plus axis-aligned rays from grid vertices (a zero-direction-component case random rays never hit,
+which found a real slab-test bug, D92). The undercut map and wall thickness are checked on shapes with known answers:
+a sphere, an overhang, tapered frusta, a slab and a spherical shell.
+
 **Engineering checks.** The same assertions run natively (Catch2) and through the WASM build under Node
-(`npm run smoke`). Tests pass at both the default and Release optimization levels. Each geometry routine was
-mutation-checked by planting classic bugs and confirming the tests fail, which also found one untested
-guard that now has a test (D26, D50, D56).
+(`npm run smoke`). Tests pass at both the default and Release optimization levels. Routines are mutation-checked
+by planting classic bugs and confirming the tests fail; surviving mutants led to new tests (D26, D50, D56, D85, D90),
+and the harness itself was fixed when it turned out it could test a stale binary (D89).
 
 ## Measured results
 
@@ -107,24 +132,38 @@ Accuracy figures are mean absolute error. Dates, settings and the full tables ar
 ## Real intraoral scans (Teeth3DS+ / 3DTeethLand, CC BY-NC-ND 4.0, used locally)
 
 Scans are not redistributed. Only aggregate metrics are reported, with attribution to Ben-Hamadou et al.
-(Teeth3DS+) and the 3DTeethLand challenge.
+(Teeth3DS+) and the 3DTeethLand challenge. Protocol: methods are tuned on training scans, checked on validation
+scans, and only then run on the Teeth3DS test split. Test part 5 was evaluated several times during development
+(each run disclosed in DECISIONS.md); test part 6 was held back and evaluated once per final method.
 
-| Measurement (cusps: held-out 3DTeethLand test set, 100 scans, 2,343 landmarks) | Result |
+**Tooth-gingiva margin: how the method progressed** (ASSD = mean symmetric boundary distance; F1 at 0.5 mm;
+tooth IoU area-weighted; paired = per-scan comparison with the previous row on the same scans)
+
+| Method | Test scans | ASSD (median) | HD95 | F1 | IoU | Paired |
+|---|---|---|---|---|---|---|
+| Naive baseline: plane cut at a height quantile | part 5 | 1.663 mm | – | 0.208 | – | |
+| Concavity-weighted geodesic Voronoi (D73) | part 5 | 0.551 (0.450) | 3.27 | 0.815 | 0.841 | |
+| + no height-band tooth seeds (D77) | part 5 | 0.520 (0.409) | 2.95 | 0.819 | 0.847 | t = −3.6 |
+| Graph cut, crease-aware boundary cost (D78) | part 5 | 0.338 (0.283) | 2.34 | 0.883 | 0.925 | t = −11.5, better on 247/300 |
+| Graph cut, first look at fresh data (D81) | part 6 | 0.357 (0.271) | 2.37 | 0.880 | 0.927 | |
+| **Per-tooth multi-label cut (D85, current)** | **part 6** | **0.285 (0.219)** | **1.98** | **0.906** | **0.936** | t = −7.3, better on 265/299 |
+
+Supervised networks trained on ~1,400 labelled scans report gingiva IoU around 0.96 (per point, other splits);
+this method reaches 0.911 per vertex with a handful of tuned parameters (D79). Things tried that did not help,
+each logged with its numbers: strip carving, seed discs, island removal, a star-shape prior, a learned per-vertex
+data term (D80, D85, D87, D88).
+
+**Other measurements on scans**
+
+| Measurement | Result |
 |---|---|
-| Cusp tips, occlusal prominence (tuned on 67 training scans) | F1 **0.631** at 1 mm (precision 0.553, recall 0.736); median localization error **0.44 mm** |
-| Naive baseline: raw mean-curvature maxima | F1 0.112 at 1 mm (200 detections per scan) |
+| Cusp tips (held-out 3DTeethLand test set, 100 scans, 2,343 landmarks) | F1 **0.631** at 1 mm (precision 0.553, recall 0.736); median error **0.44 mm**; raw-curvature baseline F1 0.112 |
 | Scan topology (median 106k vertices) | only 9/100 arches are genus 0; handle-loop count = 2·Σg on every scan |
-| Tooth-gingiva margin, concavity-weighted Voronoi (held-out Teeth3DS test split: 300 scans) | ASSD **0.551 mm** (median 0.450), HD95 3.27 mm, boundary F1 **0.815** at 0.5 mm, tooth IoU 0.841 |
-| Naive baseline: plane cut at a height quantile | ASSD 1.663 mm, boundary F1 0.208 at 0.5 mm |
-| + learned cusp-seed filter (logistic regression; model kept local, see D76) | ASSD **0.528 mm**, tooth IoU 0.869; paired: better on 130 scans, worse on 5 of 300 |
-| + no height-band tooth seeds (D77) | ASSD 0.520 mm (median 0.409), HD95 2.95 mm; paired vs 0.551: t = −3.6, better on 178, worse on 122 of 300 |
-| **Per-tooth labelling (cusp grouping + multi-label graph cut, D85; public operating point), Teeth3DS part 6, 299 scans** | ASSD **0.285 mm** (median 0.219), HD95 **1.98 mm**, boundary F1 **0.906** at 0.5 mm, tooth IoU **0.936**; paired vs the binary cut: t = −7.3, better on 265 of 299, 1 worse by > 0.1 mm |
-| Binary graph cut on part 6 (first look at fresh data, D81) | ASSD **0.357 mm** (median 0.271), HD95 2.37 mm, boundary F1 **0.880** at 0.5 mm, tooth IoU **0.927**; paired vs Voronoi: t = −12.5, better on 258 of 299 |
-| + graph-cut labelling (Boykov–Kolmogorov max-flow, D78; public operating point), part 5 | ASSD **0.338 mm** (median 0.283), HD95 **2.34 mm**, boundary F1 **0.883** at 0.5 mm, tooth IoU **0.925**; paired vs 0.520: t = −11.5, better on 247, worse on 53 (7 by > 0.1 mm) |
-| Undercut / best path of insertion (M10b, D90), 263 natural crowns on 20 scans | undercut along the occlusal axis → best axis within 25°: incisors 23.8% → 8.0%, canines 11.9% → 1.4%, premolars 8.1% → 5.0%, molars 5.5% → 1.1% (median); BVH ray casting ~0.9 M rays/s on one thread |
-| Wall thickness (M10c, D92): naive 0.8 mm offset shells of 133 scanned crowns | thinnest wall median 0.43 mm (incisors) to 0.61 mm (canines); 1-6% of the surface below 0.76 mm; ~4 M rays/s |
+| Undercut / best path of insertion, 263 natural crowns (D90) | undercut along the occlusal axis → best axis within 25°: incisors 23.8% → 8.0%, canines 11.9% → 1.4%, premolars 8.1% → 5.0%, molars 5.5% → 1.1% (medians) |
+| Wall thickness of naive 0.8 mm offset shells, 133 crowns (D92) | thinnest wall median 0.43 mm (incisors) to 0.61 mm (canines): moving vertices along normals is not a safe offset |
 | Cusp detection time, 93.6k-vertex scan | 383 ms native, 459 ms in the browser (WASM), after a 4-8× optimization (D70) |
-| Margin detection time, 113.7k-vertex scan | 733 ms in the browser (WASM) with Voronoi labelling, including cusp seeding; the graph cut adds ~100 ms per scan natively (36 → 137 ms labelling, 300-scan mean); browser not yet re-measured |
+| Margin labelling time (per-tooth cut) | ~0.65-1.1 s per scan natively after a 2.6× optimization (D86), plus ~1 s of shared inputs; several seconds in the browser |
+| Undercut search | 4.4× faster with coarse-to-fine + threads (D91); ray throughput ~1-4 M rays/s |
 
 ## Performance
 
@@ -179,9 +218,11 @@ breakdown comes from `dmw_bench`.
 - **The margin still has a tail:** HD95 is 1.98 mm on average on part 6. Part 5 was evaluated several times during
   development (each disclosed); part 6 was held back, evaluated once for the binary cut (D81) and once for the
   per-tooth cut (D85).
-- **Per-tooth labelling is slower:** 2.2 s of labelling per scan natively (0.2 s for the binary cut); in the browser
-  several seconds on a large scan. The Teeth3DS split is per
-  jaw, so some test patients have their other jaw in training.
+- **Per-tooth labelling is slower** than the binary cut: ~0.65-1.1 s of labelling per scan natively (0.2 s for the
+  binary cut), several seconds in the browser on a large scan.
+- **The Teeth3DS split is per jaw,** so some test patients have their other jaw in the training data (D81).
+- **The undercut and thickness results are on natural crowns,** not crown preparations, and the thickness study uses
+  naive offset shells built for the purpose; offsets from a signed distance field are the next step (ROADMAP M10d-e).
 - **"Margin" here is the tooth-gingiva boundary on unprepared arches,** not the finish line of a crown
   preparation that restoration design needs; related problems, not the same one.
 - **Cusp detection over-detects on anterior teeth:** incisal edges score as tips but carry no cusp
@@ -195,7 +236,7 @@ breakdown comes from `dmw_bench`.
 Toolchain used: CMake ≥ 3.24, a C++20 compiler (Apple clang 17 tested), emsdk **6.0.11**, Node 26.
 
 ```bash
-# Native: build and run the 108 tests
+# Native: build and run the tests (164)
 cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure
 
 # Benchmarks (Release build; also writes the meshes the WASM benchmark reads)
@@ -217,7 +258,8 @@ npm run build         # static site in web/dist (relative paths)
 src/core/      geometry library (public headers in include/core, private helpers in detail/)
 src/wasm/      embind bindings: the only Emscripten-specific C++
 tests/         Catch2 tests, one file per module
-tools/         dmw_bench
+tools/         dmw_bench, scan_qa, cusp_eval, margin_eval, margin_analyze, seed_train, vertex_train,
+               undercut_eval, thickness_eval (evaluation tools; scans are read from a local data/ folder)
 web/           TypeScript viewer, WASM wrapper, Node smoke test and benchmark
 DECISIONS.md   every design decision, with alternatives, reasons and measurements
 ROADMAP.md     milestones
@@ -225,8 +267,11 @@ ROADMAP.md     milestones
 
 ## Data
 
-Only synthetic meshes generated in code: spheres, tori, cylinders, grids with holes, a plate with a handle,
-a Möbius strip, an obtuse "brick" grid and a defect showcase. No third-party or scanned data is included.
+The repository and the demo contain only meshes generated in code (spheres, tori, cylinders, grids with holes, a
+plate with a handle, a Möbius strip, an obtuse "brick" grid, a defect showcase). The dental results were computed
+locally on Teeth3DS+ / 3DTeethLand (CC BY-NC-ND 4.0); those scans, anything derived from them, and the two small
+trained models are not redistributed. To reproduce, download the dataset into `data/` (git-ignored) and run the
+tools in `tools/`.
 
 ## References
 
@@ -242,6 +287,22 @@ a Möbius strip, an obtuse "brick" grid and a defect showcase. No third-party or
 - J. Erickson, K. Whittlesey. *Greedy Optimal Homotopy and Homology Generators.* SODA 2005.
 - N. Sharp, K. Crane. *A Laplacian for Nonmanifold Triangle Meshes.* Computer Graphics Forum (SGP), 2020.
   Cited as the non-manifold generalization; not implemented here.
+- Y. Boykov, V. Kolmogorov. *An Experimental Comparison of Min-Cut/Max-Flow Algorithms for Energy Minimization in
+  Vision.* IEEE TPAMI 26(9), 2004.
+- Y. Boykov, O. Veksler, R. Zabih. *Fast Approximate Energy Minimization via Graph Cuts.* IEEE TPAMI 23(11), 2001.
+- V. Kolmogorov, R. Zabih. *What Energy Functions Can Be Minimized via Graph Cuts?* IEEE TPAMI 26(2), 2004.
+- B. L. Price, B. Morse, S. Cohen. *Geodesic Graph Cut for Interactive Image Segmentation.* CVPR 2010.
+- O. Veksler. *Star Shape Prior for Graph-Cut Image Segmentation.* ECCV 2008.
+- V. Gulshan, C. Rother, A. Criminisi, A. Blake, A. Zisserman. *Geodesic Star Convexity for Interactive Image
+  Segmentation.* CVPR 2010.
+- T. Möller, B. Trumbore. *Fast, Minimum Storage Ray-Triangle Intersection.* Journal of Graphics Tools 2(1), 1997.
+- J. D. MacDonald, K. S. Booth. *Heuristics for Ray Tracing Using Space Subdivision.* The Visual Computer 6(3), 1990.
+- I. Wald. *On Fast Construction of SAH-based Bounding Volume Hierarchies.* IEEE Symposium on Interactive Ray
+  Tracing, 2007.
+- L. Shapira, A. Shamir, D. Cohen-Or. *Consistent Mesh Partitioning and Skeletonisation Using the Shape Diameter
+  Function.* The Visual Computer 24(4), 2008.
+- A. Ben-Hamadou et al. *Teeth3DS: a Benchmark for Teeth Segmentation and Labeling from Intra-oral 3D Scans.*
+  arXiv:2210.06094 (Teeth3DS+ dataset, CC BY-NC-ND 4.0), and the 3DTeethLand challenge (MICCAI 2024).
 
 ## License
 

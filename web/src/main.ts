@@ -314,6 +314,7 @@ applyTheme();
 // loads a scan from the git-ignored data folder, detects the margin, overlays the labelled boundary and frames
 // the given point. Vite serves files outside the web root under /@fs (allowed in vite.config.ts).
 async function inspectFromUrl(): Promise<boolean> {
+  if (!import.meta.env.DEV) return false; // local scans are served by the dev server only; never on the public site
   const q = new URLSearchParams(location.search);
   const scan = q.get("scan");
   if (!scan) return false;
