@@ -80,7 +80,9 @@ function display(d: MeshData, keepCamera: boolean): void {
       cuspMillis = null;
       marginInfo = "";
       undercutInfo = "";
+      thicknessInfo = ""; // per-mesh results must not carry over to the next mesh
       viewer.setUndercut(null);
+      viewer.setThickness(null, 1);
       viewer.setMargin(null, null);
       viewer.setCusps(null, null);
     }
@@ -212,7 +214,12 @@ idt.addEventListener("change", () => {
 });
 // A real <button> is focusable and keyboard-operable; it forwards to the hidden file input.
 byId<HTMLButtonElement>("open").addEventListener("click", () => fileInput.click());
-fileInput.addEventListener("change", () => fileInput.files?.[0] && openFile(fileInput.files[0]));
+// Clear the input after each use: re-selecting the same file would otherwise fire no change event (D97).
+fileInput.addEventListener("change", async () => {
+  const f = fileInput.files?.[0];
+  if (f) await openFile(f);
+  fileInput.value = "";
+});
 view.addEventListener("dragover", (e) => e.preventDefault());
 view.addEventListener("drop", (e) => {
   e.preventDefault();
@@ -249,6 +256,7 @@ const landmarkInput = byId<HTMLInputElement>("landmarks");
 byId<HTMLButtonElement>("open-landmarks").addEventListener("click", () => landmarkInput.click());
 landmarkInput.addEventListener("change", async () => {
   const f = landmarkInput.files?.[0];
+  landmarkInput.value = "";
   if (!f) return;
   try {
     truthXyz = parseCuspLandmarks(await f.text());
@@ -275,6 +283,7 @@ const labelInput = byId<HTMLInputElement>("labels");
 byId<HTMLButtonElement>("open-labels").addEventListener("click", () => labelInput.click());
 labelInput.addEventListener("change", async () => {
   const f = labelInput.files?.[0];
+  labelInput.value = "";
   if (!f || !data) return;
   try {
     if (!marginEdges) throw new Error("detect the margin first");

@@ -13,6 +13,12 @@ lands **0.285 mm** from the labelled one on average (ASSD; median 0.219 mm), wit
 tooth IoU **0.936**. The first working version measured 0.551 mm / 0.815; each step in between came from measuring
 why the previous one failed ([case study](docs/CASE_STUDY.md), [all decisions](DECISIONS.md)).
 
+![Viewer recording: an OBJ is opened, rendered with a curvature overlay, its tooth-gingiva margin detected and scored against the known boundary, then 1 mm offset shells built by moving vertices along normals (folds, wall down to ~0 mm) and from the signed distance field (0.91 mm thinnest, 1.0 mm median)](docs/demo.gif)
+
+*Recorded by [`web/scripts/record-demo.mjs`](web/scripts/record-demo.mjs) (headless Chromium driving the built site; captions
+quote the numbers the viewer displays). The mesh is a synthetic molar generated in code (`tools/export_demo`), not a
+scan.*
+
 **Live demo: [carlmarco.github.io/dental-mesh-workbench](https://carlmarco.github.io/dental-mesh-workbench/)**,
 built and deployed by CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml): native tests, WASM build, a
 cross-target smoke test, then GitHub Pages). The demo meshes are generated in code. Files you open in the viewer are processed locally in your browser and

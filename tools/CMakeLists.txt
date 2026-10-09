@@ -54,3 +54,8 @@ target_compile_options(undercut_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversi
 add_executable(thickness_eval thickness_eval.cpp)
 target_link_libraries(thickness_eval PRIVATE dmw_core)
 target_compile_options(thickness_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Synthetic molar as OBJ + Teeth3DS-format labels, for demos and the README recording (D97).
+add_executable(export_demo export_demo.cpp)
+target_link_libraries(export_demo PRIVATE dmw_core)
+target_compile_options(export_demo PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)

@@ -1013,3 +1013,17 @@ Each entry: the choice, the alternatives considered, and the reason.
 - Torus with wall = tube radius (0.3): the SDF shell correctly leaves a solid tube (no room for an inner wall), while the
   naive shell collapses its inner copy onto the tube's centre circle and a thickness check reads ~0.3 as if fine: the
   naive offset can fool the very check meant to catch it.
+
+## D97. A scripted README recording
+- web/scripts/record-demo.mjs drives the production build in headless Chromium (playwright-core; SwiftShader WebGL):
+  uploads an OBJ through the real file input, orbits the view, shows the kappa_min overlay, detects the margin and
+  loads the labels, builds naive and signed-distance 1 mm shells with the thickness map; screenshots at 4 fps are
+  decoded and encoded into one GIF inside the browser (gifenc, a shared 256-colour palette), so no ffmpeg or PNG
+  decoder is needed. Captions quote numbers read from the page. The mesh is the synthetic molar (tools/export_demo
+  writes it as OBJ plus Teeth3DS-format labels); scans cannot appear in public media. Output: docs/demo.gif (4.2 MB).
+- Two viewer bugs found by scripting the UI: re-selecting the same file fired no change event (the inputs are now
+  cleared after use), and thickness results carried over to the next mesh (now reset on load).
+- Caption honesty: on the naive shell the legend's "share below 95% of the wall" also counts vertices at the patch rim,
+  where cone rays reach the stitched side wall (the D92 rim artifact), and the fold under the 0.3 mm fissure is only a
+  few vertices wide on screen. The caption therefore quotes only the thinnest wall, which tests/test_offset.cpp ties
+  to the occlusal table.
