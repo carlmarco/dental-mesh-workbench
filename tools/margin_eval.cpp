@@ -772,7 +772,7 @@ int main(int argc, char** argv) {
         std::printf("\nF1@0.5 decomposition (pooled boundary samples): precision %.3f, recall %.3f, pooled F1 %.3f\n", precision,
                     recall, 2 * precision * recall / (precision + recall));
         std::printf("  recall misses (%.1f%% of true samples): on missed teeth %.1f%%, 0.5-1 mm off %.1f%%, > 1 mm off %.1f%%\n",
-                    100 * r_miss / rg, 100 * e.r_missed_tooth / rg, 100 * e.r_near / rg, 100 * e.r_far / rg);
+                    100 * r_miss / rg, 100 * double(e.r_missed_tooth) / rg, 100 * double(e.r_near) / rg, 100 * double(e.r_far) / rg);
         std::printf("    of the > 1 mm recall misses: gingiva side labelled tooth (over-extension) %.1f%%, interdental (two teeth"
                     " within 1.5 mm) %.1f%%, both %.1f%%\n", 100.0 * double(e.r_far_overext) / double(e.r_far),
                     100.0 * double(e.r_far_interdental) / double(e.r_far), 100.0 * double(e.r_far_overext_interdental) / double(e.r_far));
@@ -811,7 +811,8 @@ int main(int argc, char** argv) {
                 std::printf("  %-34s %8zu %10s %10.2f %12.2f %13.1f%%\n", pnames[i][j], e.kp_ring[i][j].size(), "-",
                             q(e.kp_ring[i][j], 0.5), q(e.kp_ring[i][j], 0.25), 100.0 * frac_below(e.kp_ring[i][j], -1.0));
         std::printf("  precision misses (%.1f%% of predicted samples): fake regions on gingiva %.1f%%, 0.5-1 mm off %.1f%%,"
-                    " > 1 mm off (not fake) %.1f%%\n", 100 * p_miss / pg, 100 * e.p_fake / pg, 100 * e.p_near / pg, 100 * e.p_far / pg);
+                    " > 1 mm off (not fake) %.1f%%\n", 100 * p_miss / pg, 100 * double(e.p_fake) / pg, 100 * double(e.p_near) / pg,
+                    100 * double(e.p_far) / pg);
     }
     if (g_experiment == "profile" && g_timings.calls) {
         const double n = double(g_timings.calls);

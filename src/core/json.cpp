@@ -145,8 +145,8 @@ private:
             if (pos_ >= s_.size() || s_[pos_] != ':') return fail("expected ':'");
             ++pos_;
             skip_ws();
-            out.object.emplace_back(std::move(key), JsonValue{});
-            if (!value(out.object.back().second, depth + 1)) return false;
+            out.object.push_back({std::move(key), JsonValue{}});
+            if (!value(out.object.back().value, depth + 1)) return false;
             skip_ws();
             if (pos_ < s_.size() && s_[pos_] == ',') { ++pos_; continue; }
             if (pos_ < s_.size() && s_[pos_] == '}') return ++pos_, true;

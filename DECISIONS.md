@@ -928,3 +928,14 @@ Each entry: the choice, the alternatives considered, and the reason.
   (medians per crown; ~4 M rays/s on all threads.) A naive normal offset loses up to ~45% of the nominal wall in
   concave regions and along thin incisal edges, mostly visible to oblique rays: the case for offsets computed from a
   signed distance field (M10d-e) rather than moving vertices along normals.
+
+## D93. Publication; first Linux CI build
+- Published at github.com/carlmarco/dental-mesh-workbench (public; the demo deploys to GitHub Pages from CI). Before
+  pushing, history was rewritten so commit metadata uses the GitHub noreply address and the decision log carries no
+  personal context; trees are otherwise unchanged. Scans, derived data and trained models were never committed.
+- The first Linux CI build (clang 18 with libstdc++) failed where Apple clang 17 with libc++ passed:
+  (1) JsonValue held a std::vector<std::pair<std::string, JsonValue>>, a pair instantiated while JsonValue is still
+  incomplete; libstdc++ rejects it, libc++ tolerates it. Now a vector of a forward-declared JsonMember (vector of an
+  incomplete type is guaranteed since C++17). (2) -Wimplicit-int-float-conversion (size_t -> double) in margin_eval
+  under -Werror; explicit casts. Both reproduced and verified locally in an Ubuntu 24.04 container (build clean,
+  164 tests pass) before pushing the fix.
