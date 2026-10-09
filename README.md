@@ -122,6 +122,7 @@ Scans are not redistributed. Only aggregate metrics are reported, with attributi
 | Binary graph cut on part 6 (first look at fresh data, D81) | ASSD **0.357 mm** (median 0.271), HD95 2.37 mm, boundary F1 **0.880** at 0.5 mm, tooth IoU **0.927**; paired vs Voronoi: t = −12.5, better on 258 of 299 |
 | + graph-cut labelling (Boykov–Kolmogorov max-flow, D78; public operating point), part 5 | ASSD **0.338 mm** (median 0.283), HD95 **2.34 mm**, boundary F1 **0.883** at 0.5 mm, tooth IoU **0.925**; paired vs 0.520: t = −11.5, better on 247, worse on 53 (7 by > 0.1 mm) |
 | Undercut / best path of insertion (M10b, D90), 263 natural crowns on 20 scans | undercut along the occlusal axis → best axis within 25°: incisors 23.8% → 8.0%, canines 11.9% → 1.4%, premolars 8.1% → 5.0%, molars 5.5% → 1.1% (median); BVH ray casting ~0.9 M rays/s on one thread |
+| Wall thickness (M10c, D92): naive 0.8 mm offset shells of 133 scanned crowns | thinnest wall median 0.43 mm (incisors) to 0.61 mm (canines); 1-6% of the surface below 0.76 mm; ~4 M rays/s |
 | Cusp detection time, 93.6k-vertex scan | 383 ms native, 459 ms in the browser (WASM), after a 4-8× optimization (D70) |
 | Margin detection time, 113.7k-vertex scan | 733 ms in the browser (WASM) with Voronoi labelling, including cusp seeding; the graph cut adds ~100 ms per scan natively (36 → 137 ms labelling, 300-scan mean); browser not yet re-measured |
 

@@ -881,3 +881,50 @@ Each entry: the choice, the alternatives considered, and the reason.
 - Speed: BVH build 111 ms per scan, ~0.9 M rays/s on one thread (measured while a VM used ~3 cores); a molar search
   takes ~4 s natively, the whole-arch search 13.7 s in the browser. Next: coarse-to-fine (face subsampling for the
   global stage) and threads. Viewer: "Undercut (occlusal axis)" / "Best path of insertion" buttons and an overlay.
+
+## D91. Undercut search speed: precompute, coarse-to-fine, native threads
+- Face data (lifted ray origin, unit normal, area) computed once per query instead of per direction. With more than
+  coarse_faces = 2,000 region faces, the spiral and the main pattern search score a regular subsample; then the
+  incumbent is re-scored on every face, a full-resolution pattern search runs (1 deg down to 0.25 deg) and the final
+  map uses every face. Native builds split rays over hardware threads (fixed chunks, flags per face, deterministic
+  for a given thread count; areas agree with the serial sum to 1e-12 relative, the order of summation differs).
+  WebAssembly stays single-threaded (threads need cross-origin isolation headers GitHub Pages cannot send).
+- Tests: threads give identical flags (and every face flagged when withdrawing against a tapered wall, which kills
+  "a chunk misses its last face"); coarse-to-fine still finds the undercut-free axis on 12,288 faces with 1,000 coarse
+  faces, and with only 24. Surviving mutant, kept as a safeguard: removing the full-resolution polish passes all tests
+  (on these shapes the coarse optimum is already undercut-free at full resolution).
+- Same run, 71 crowns on 5 scans: every face on 1 thread 104.0 s (median 835 ms per tooth) -> coarse-to-fine on 10
+  threads 23.4 s (median 208 ms), 4.4x. The machine was loaded (the run used ~1.1 cores on average), so most of the
+  gain is coarse-to-fine. Accuracy: undercut at the chosen axis differs by median 0.000 percentage points; the fast
+  search is worse on 26 of 71 crowns, by at most +0.83 points.
+
+## D92. M10c: wall thickness (ray cones), and two ray-casting robustness bugs it exposed
+- core/thickness: per vertex, rays into the solid around the inward normal (30 rays in a 30-degree cone, Fibonacci
+  cap); a ray counts only if it leaves through the opposite wall (the hit face's outward normal points along the
+  ray). Statistics: along the normal (exact between parallel walls), cone minimum (thinnest local wall), cone median
+  (robust, after the shape diameter function of Shapira, Shamir & Cohen-Or 2008, who use a trimmed weighted mean).
+  NaN where nothing is accepted (open surfaces). Native threads like D91.
+- Tests: closed slab (normal ray and cone minimum = h; median within [h, h/cos 30]); spherical shell R_out - R_in
+  from both walls (< 0.01 with level-4 facets); open sheet -> NaN; two same-facing sheets -> NaN (wrong-side hits
+  rejected). 4 mutants killed (wrong-side hits accepted, cone minimum = median, no self-hit offset, outward rays).
+- Bug 1 (BVH, D89): with a zero direction component, (lo - o) * inf = NaN when the origin lies exactly on a box plane,
+  and the fmin/fmax slab test then rejected the box. Random-ray tests never have exact zero components; the slab test
+  (vertical rays from grid vertices) did. Fixed by handling zero components explicitly; new BVH test with
+  axis-aligned rays from grid-aligned origins (the old code fails it). The D90 scan results used generic directions.
+- Bug 2 (ray-triangle): rays through a shared vertex or edge can slip between triangles by rounding (barycentric
+  u = -1e-17 on both). Offset shells (M10e) align inner and outer vertices along normals, so this is systematic there.
+  Barycentric bounds are now inflated by 1e-10.
+- Real geometry: scans are open, so each crown becomes a naive 0.8 mm shell (crown surface, a copy moved inward along
+  vertex normals, a stitched side wall). 133 crowns on 10 scans, vertices > 1 mm from the rim (rim vertices see the
+  side wall at short range; including them made 9-18% look thin, an artifact):
+
+  | tooth type | crowns | thinner than 0.76 mm, cone minimum | normal ray only | minimum wall | ms per crown |
+  |---|---:|---:|---:|---:|---:|
+  | incisors | 40 | 6.0% | 0.3% | 0.432 mm | 55 |
+  | canines | 20 | 1.1% | 0.1% | 0.614 mm | 57 |
+  | premolars | 38 | 3.6% | 0.3% | 0.490 mm | 74 |
+  | molars | 35 | 2.8% | 0.3% | 0.519 mm | 95 |
+
+  (medians per crown; ~4 M rays/s on all threads.) A naive normal offset loses up to ~45% of the nominal wall in
+  concave regions and along thin incisal edges, mostly visible to oblique rays: the case for offsets computed from a
+  signed distance field (M10d-e) rather than moving vertices along normals.

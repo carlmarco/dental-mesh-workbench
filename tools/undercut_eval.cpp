@@ -2,13 +2,15 @@
 // label in the Teeth3DS ground truth; labels only define the regions), the undercut fraction along the occlusal
 // axis and along the best path of insertion within 25 degrees; plus one common path for all teeth of the arch
 // (the removable-appliance / aligner case). Reports timing and ray throughput.
-//   undercut_eval <scan-dir> [stride]
+//   undercut_eval <scan-dir> [stride] [compare]
+// compare (D91): per tooth, the search with every face on one thread vs coarse-to-fine on all threads, same run.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "core/bvh.h"
@@ -44,6 +46,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::size_t stride = argc > 2 ? std::stoul(argv[2]) : 15;
+    const bool compare = argc > 3 && std::string(argv[3]) == "compare";
+    std::vector<double> full_ms, fast_ms, diff_pts;
     const auto objs = dataset::index_files({argv[1]}, ".obj");
     const auto labels = dataset::index_files({argv[1]}, ".json");
     struct PerType {
@@ -79,6 +83,17 @@ int main(int argc, char** argv) {
             reg[f] = 1, all_teeth[f] = 1;
         }
         for (const auto& [fdi, reg] : region) {
+            if (compare) {
+                t0 = Clock::now();
+                const InsertionAxis full = best_insertion_axis(m, bvh, reg, axis, 25.0, 120, 0.25, 0.0, 0, 1);
+                full_ms.push_back(ms_since(t0));
+                t0 = Clock::now();
+                const InsertionAxis fast = best_insertion_axis(m, bvh, reg, axis, 25.0, 120, 0.25, 0.0, 2000, 0);
+                fast_ms.push_back(ms_since(t0));
+                diff_pts.push_back(100.0 * (fast.result.fraction() - full.result.fraction()));
+                ++teeth;
+                continue;
+            }
             t0 = Clock::now();
             const double occ = undercut_map(m, bvh, axis, reg).fraction();
             const InsertionAxis best = best_insertion_axis(m, bvh, reg, axis, 25.0);
@@ -93,6 +108,11 @@ int main(int argc, char** argv) {
             pt.ms.push_back(ms);
             ++teeth;
         }
+        if (compare) {
+            ++scans;
+            std::fprintf(stderr, "\r%zu scans, %zu teeth", scans, teeth);
+            continue;
+        }
         const InsertionAxis arch = best_insertion_axis(m, bvh, all_teeth, axis, 25.0);
         arch_occlusal.push_back(100.0 * undercut_map(m, bvh, axis, all_teeth).fraction());
         arch_best.push_back(100.0 * arch.result.fraction());
@@ -102,6 +122,19 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "\r%zu scans, %zu teeth", scans, teeth);
     }
     std::fprintf(stderr, "\n");
+    if (compare) {
+        double sf = 0, sq = 0, worst = 0;
+        for (double x : full_ms) sf += x;
+        for (double x : fast_ms) sq += x;
+        std::size_t worse = 0;
+        for (double d : diff_pts) worst = std::max(worst, d), worse += d > 1e-9;
+        std::printf("compare on %zu teeth (%zu scans): every face, 1 thread: %.0f ms total (median %.0f per tooth); coarse-to-fine, %u threads:"
+                    " %.0f ms total (median %.0f); speed-up %.1fx\n", teeth, scans, sf, median(full_ms), std::thread::hardware_concurrency(), sq,
+                    median(fast_ms), sf / std::max(sq, 1e-9));
+        std::printf("undercut at the chosen axis, fast minus full (percentage points): median %+.3f, worse on %zu of %zu teeth, largest %+.3f\n",
+                    median(diff_pts), worse, diff_pts.size(), worst);
+        return 0;
+    }
     std::printf("scans: %zu, teeth: %zu; BVH build median %.0f ms; ray throughput median %.2f M rays/s (one thread)\n\n", scans, teeth,
                 median(build_ms), median(rays_per_s) / 1e6);
     std::printf("| tooth type | teeth | undercut along occlusal axis (median %% of crown) | best axis within 25 deg (median %%) | median tilt (deg) | median ms per tooth |\n");

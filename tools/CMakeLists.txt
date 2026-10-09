@@ -48,3 +48,9 @@ target_compile_options(vertex_train PRIVATE -Wall -Wextra -Wpedantic -Wconversio
 add_executable(undercut_eval undercut_eval.cpp)
 target_link_libraries(undercut_eval PRIVATE dmw_core)
 target_compile_options(undercut_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Wall thickness of naive offset shells built from scanned crowns (M10c, D92).
+#   ./build-release/tools/thickness_eval data/data_part_1 30 0.8
+add_executable(thickness_eval thickness_eval.cpp)
+target_link_libraries(thickness_eval PRIVATE dmw_core)
+target_compile_options(thickness_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)

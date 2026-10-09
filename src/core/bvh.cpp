@@ -18,11 +18,14 @@ inline bool hit_triangle(const Vec3& o, const Vec3& d, const Vec3& v0, const Vec
     if (std::abs(det) < 1e-18) return false;  // ray parallel to the triangle's plane (or a degenerate triangle)
     const double inv = 1.0 / det;
     const Vec3 s = o - v0;
+    // Barycentric bounds inflated by kEdge (dimensionless): a ray through a shared edge or vertex hits at least one of
+    // the triangles instead of slipping between them by rounding (D92: offset shells align vertices along normals).
+    constexpr double kEdge = 1e-10;
     u = dot(s, p) * inv;
-    if (u < 0.0 || u > 1.0) return false;
+    if (u < -kEdge || u > 1.0 + kEdge) return false;
     const Vec3 q = cross(s, e1);
     v = dot(d, q) * inv;
-    if (v < 0.0 || u + v > 1.0) return false;
+    if (v < -kEdge || u + v > 1.0 + kEdge) return false;
     t = dot(e2, q) * inv;
     return t > t_min && t < t_max;
 }
@@ -42,15 +45,23 @@ struct Box {
 };
 inline double axis(const Vec3& p, int a) { return a == 0 ? p.x : a == 1 ? p.y : p.z; }
 
-// Entry distance of the ray into the box, or +inf if it misses within [t_min, t_max]. fmin/fmax ignore the
-// NaN of 0 * inf (an axis-parallel ray starting exactly on a slab plane).
+// Entry distance of the ray into the box, or +inf if it misses within [t_min, t_max]. Axes with a zero direction
+// component are handled explicitly: the ray is inside that slab for all t or for none (computing (lo - o) * inf
+// would give NaN = 0 * inf for an origin exactly on the slab plane; D92 found this with axis-aligned rays).
 inline double enter(const Vec3& lo, const Vec3& hi, const Vec3& o, const Vec3& inv, double t_min, double t_max) {
-    const double tx1 = (lo.x - o.x) * inv.x, tx2 = (hi.x - o.x) * inv.x;
-    const double ty1 = (lo.y - o.y) * inv.y, ty2 = (hi.y - o.y) * inv.y;
-    const double tz1 = (lo.z - o.z) * inv.z, tz2 = (hi.z - o.z) * inv.z;
-    const double t0 = std::fmax(std::fmax(std::fmin(tx1, tx2), std::fmin(ty1, ty2)), std::fmax(std::fmin(tz1, tz2), t_min));
-    const double t1 = std::fmin(std::fmin(std::fmax(tx1, tx2), std::fmax(ty1, ty2)), std::fmin(std::fmax(tz1, tz2), t_max));
-    return t0 <= t1 ? t0 : std::numeric_limits<double>::infinity();
+    double t0 = t_min, t1 = t_max;
+    const double ol[3] = {lo.x, lo.y, lo.z}, oh[3] = {hi.x, hi.y, hi.z}, oo[3] = {o.x, o.y, o.z}, iv[3] = {inv.x, inv.y, inv.z};
+    for (int k = 0; k < 3; ++k) {
+        if (std::isinf(iv[k])) {  // direction component 0
+            if (oo[k] < ol[k] || oo[k] > oh[k]) return std::numeric_limits<double>::infinity();
+            continue;
+        }
+        double a = (ol[k] - oo[k]) * iv[k], b = (oh[k] - oo[k]) * iv[k];
+        if (a > b) std::swap(a, b);
+        t0 = std::max(t0, a), t1 = std::min(t1, b);
+        if (t0 > t1) return std::numeric_limits<double>::infinity();
+    }
+    return t0;
 }
 
 }  // namespace

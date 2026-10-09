@@ -87,3 +87,21 @@ TEST_CASE("bvh: rays from inside a closed sphere always hit, at the radius", "[b
     }
     CHECK(bvh.node_count() < 2 * m.triangles.size());
 }
+
+TEST_CASE("bvh: axis-aligned rays from grid-aligned origins (zero direction components, origins on box planes)", "[bvh]") {
+    // Two parallel grids: rays straight down from the upper grid's vertices start exactly on bounding-box planes
+    // of the lower grid's nodes and pass exactly through its vertices.
+    TriMesh m = make_grid(16, 16);
+    TriMesh top = make_grid(16, 16);
+    for (auto& p : top.positions) p.z = 1.0;
+    append(m, top);
+    const Bvh bvh(m.positions, m.triangles);
+    for (std::size_t v = m.positions.size() / 2; v < m.positions.size(); ++v) {
+        const Vec3 o = m.positions[v];
+        const RayHit a = bvh.intersect(o, {0, 0, -1}, 1e-9), b = intersect_brute_force(m.positions, m.triangles, o, {0, 0, -1}, 1e-9);
+        INFO("vertex " << v);
+        REQUIRE(b.hit);
+        REQUIRE(a.hit);
+        CHECK_THAT(a.t, WithinAbs(1.0, 1e-12));
+    }
+}

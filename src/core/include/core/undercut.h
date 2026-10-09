@@ -23,12 +23,16 @@ struct UndercutResult {
 
 // `back_facing_tolerance`: a face counts as back-facing only if n . d < -tolerance (n unit). 0 is the strict
 // definition; a small positive value ignores faces that are numerically parallel to d.
+// `threads`: 0 = all hardware threads (native builds; WebAssembly builds are single-threaded), 1 = serial.
 UndercutResult undercut_map(const TriMesh& mesh, const Bvh& bvh, const Vec3& d, std::span<const std::uint8_t> region = {},
-                            double back_facing_tolerance = 0.0);
+                            double back_facing_tolerance = 0.0, int threads = 0);
 
 // Path of insertion minimizing the undercut area of `region`: directions within `max_tilt_degrees` of `hint`
 // sampled on a Fibonacci spiral (`samples`), then a local pattern search on the sphere around the best sample
 // (step halving down to `min_step_degrees`). Returns the axis and its undercut result.
+// Coarse-to-fine (D91): with more than `coarse_faces` region faces (0 = off), the spiral and the main pattern search
+// evaluate a regular subsample of the faces; a short pattern search at full resolution (steps of 1 degree down to
+// `min_step_degrees`) and the final evaluation use every face.
 struct InsertionAxis {
     Vec3 axis;
     UndercutResult result;
@@ -36,6 +40,6 @@ struct InsertionAxis {
 };
 InsertionAxis best_insertion_axis(const TriMesh& mesh, const Bvh& bvh, std::span<const std::uint8_t> region, const Vec3& hint,
                                   double max_tilt_degrees = 30.0, int samples = 120, double min_step_degrees = 0.25,
-                                  double back_facing_tolerance = 0.0);
+                                  double back_facing_tolerance = 0.0, std::size_t coarse_faces = 2000, int threads = 0);
 
 }  // namespace dmw

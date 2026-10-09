@@ -110,3 +110,33 @@ TEST_CASE("undercut: local refinement finds a narrow optimum the coarse spiral m
     CHECK(std::acos(std::min(1.0, limited.axis.z)) <= 10.0 * deg + 1e-9);
     CHECK(limited.result.undercut_area > 0.0);
 }
+
+TEST_CASE("undercut: threads give identical results; coarse-to-fine still finds an undercut-free axis", "[undercut]") {
+    const double deg = std::acos(-1.0) / 180.0;
+    const auto m = frustum(3.0, 3.0 - 5.0 * std::tan(3.0 * deg), 5.0, 15.0 * deg, 256, 24);  // 12,288 faces
+    const Bvh bvh(m.positions, m.triangles);
+    const auto serial = undercut_map(m, bvh, {0.1, 0.2, 1.0}, {}, 0.0, 1);
+    const auto parallel = undercut_map(m, bvh, {0.1, 0.2, 1.0}, {}, 0.0, 4);
+    CHECK(serial.undercut == parallel.undercut);
+    // Same faces; the summed area differs only by floating-point summation order (chunks), deterministic per thread count.
+    CHECK_THAT(parallel.undercut_area, WithinAbs(serial.undercut_area, 1e-12 * serial.region_area));
+    // Withdrawing against the frustum's own axis, every face of the (upward-tapered) wall faces away: all must be
+    // flagged, by every thread.
+    const auto all_down = undercut_map(m, bvh, {0.0, std::sin(15.0 * deg), -std::cos(15.0 * deg)}, {}, 0.0, 4);  // -axis
+    std::size_t flagged = 0;
+    for (auto x : all_down.undercut) flagged += x;
+    CHECK(flagged == m.triangles.size());
+    // Coarse stage on ~1,000 of 12,288 faces, then a full-resolution polish: must still reach the 3-degree cone.
+    const InsertionAxis best = best_insertion_axis(m, bvh, {}, {0, 0, 1}, 30.0, 60, 0.25, 0.0, 1000);
+    CHECK(best.result.undercut_area == 0.0);
+}
+
+TEST_CASE("undercut: a misleadingly sparse coarse stage is corrected by the full-resolution polish", "[undercut]") {
+    // 1-degree taper tilted 13 degrees, coarse stage on only ~24 faces: the coarse optimum (nearest the hint among
+    // its apparently undercut-free directions) need not be undercut-free at full resolution.
+    const double deg = std::acos(-1.0) / 180.0;
+    const auto m = frustum(3.0, 3.0 - 5.0 * std::tan(1.0 * deg), 5.0, 13.0 * deg, 192, 16);
+    const Bvh bvh(m.positions, m.triangles);
+    const InsertionAxis best = best_insertion_axis(m, bvh, {}, {0, 0, 1}, 30.0, 60, 0.25, 0.0, 24);
+    CHECK(best.result.undercut_area == 0.0);
+}
