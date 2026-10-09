@@ -991,3 +991,9 @@ Each entry: the choice, the alternatives considered, and the reason.
   The SDF shell keeps ~95% of the nominal wall everywhere (the remainder is grid error at h = 0.12 mm); where the crown
   is thinner than twice the wall, the inner offset simply vanishes and the region is solid instead of folding. Cost:
   ~3 s per crown for the distance field, extraction and check (native, threaded) vs ~40 ms for the naive shell.
+- CI follow-up: the torus test failed on GitHub's x86 runner although it passed on macOS and in an ARM Ubuntu
+  container: a crossing that rounds onto a node (t = 1 in floating point, field not exactly at the iso value) still
+  duplicated the node vertex, and whether that happens depends on rounding (clang fuses multiply-adds on ARM by
+  default). Values within 1e-10 h of the iso value now snap to 0, so every near-node crossing uses the shared node
+  vertex. Reproduced and verified under x86 emulation (docker --platform linux/amd64; all 170 tests pass); pre-push
+  checks now include that platform.

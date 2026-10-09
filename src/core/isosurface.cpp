@@ -60,7 +60,12 @@ TriMesh extract_isosurface(const Grid3& g, double iso) {
                     const std::size_t ci = i + (c & 1), cj = j + ((c >> 1) & 1), ck = k + ((c >> 2) & 1);
                     node[static_cast<std::size_t>(c)] = g.index(ci, cj, ck);
                     pos[static_cast<std::size_t>(c)] = g.position(ci, cj, ck);
-                    s[static_cast<std::size_t>(c)] = g.values[node[static_cast<std::size_t>(c)]] - iso;
+                    // Values within 1e-10 h of the iso value snap to exactly 0, so every near-node crossing takes the shared
+                    // node vertex below: otherwise a crossing that rounds onto a node (t = 1 in floating point) duplicates
+                    // it, and whether that happens depends on the platform's rounding (x86 vs ARM fused multiply-add).
+                    double sv = g.values[node[static_cast<std::size_t>(c)]] - iso;
+                    if (std::abs(sv) < 1e-10 * g.h) sv = 0.0;
+                    s[static_cast<std::size_t>(c)] = sv;
                     (s[static_cast<std::size_t>(c)] < 0.0 ? any_neg : any_pos) = true;
                 }
                 if (!any_neg || !any_pos) continue;
