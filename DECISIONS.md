@@ -939,3 +939,24 @@ Each entry: the choice, the alternatives considered, and the reason.
   incomplete type is guaranteed since C++17). (2) -Wimplicit-int-float-conversion (size_t -> double) in margin_eval
   under -Werror; explicit casts. Both reproduced and verified locally in an Ubuntu 24.04 container (build clean,
   164 tests pass) before pushing the fix.
+
+## D94. M10d: generalized signed distance by the signed heat method on a grid, with exact spectral solves
+- Method (Feng & Crane, "A Heat Method for Generalized Signed Distance", ACM TOG 43(4), 2024): diffuse the surface
+  normals by one backward-Euler heat step, normalize, integrate by least squares (Poisson), shift so the input surface
+  sits at 0. Here on a regular grid with cell-centred nodes and zero-flux boundaries; normals are splatted as an
+  area-weighted density from sample points (spacing <= h/2).
+- Solver choice: on a Neumann box, the discrete Laplacian L = -D^T D (D = forward differences on edges) is exactly
+  diagonal in the orthonormal DCT-II basis, so both the screened solve (I - tL) and the Poisson solve are exact
+  separable transforms (dense per-axis cosine matrices; O(N n) per transform, threaded natively). This sidesteps the
+  failure of D47 (conjugate gradient losing the exponentially small far-field heat). Integration is the least-squares
+  problem D^T D phi = D^T X with X averaged onto edges, which is exactly the system the DCT diagonalizes.
+- Tests: the DCT solves reproduce a random zero-mean field through the Neumann Laplacian and the screened operator to
+  1e-10; a sphere matches |p| - 1 and improves under refinement; a sphere with a hole of radius ~0.8 is still signed
+  correctly (negative at the centre and under the hole, positive outside; mean error 0.06 within 0.2 away from it).
+  4 mutants killed (no normalization, no shift, divergence sign, Laplacian eigenvalue).
+- Measured (unit sphere, icosphere level 6; mean |error| within 0.2 of the surface / max error 0.2-0.5 away):
+  t = h^2: h 0.08 0.0011 / 0.0081, 0.04 0.0005 / 0.0032, 0.02 0.0005 / 0.0077 (stalls: the far-field heat at t = h^2
+  approaches the floating-point floor); t = 4h^2: 0.0010 / 0.0016, 0.0002 / 0.0007, 0.00004 / 0.0007 (converges).
+  Unit cube (sharp edges): t = h^2 h 0.04 0.0168, 0.02 0.0084 (first order, edges rounded); t = 4h^2 0.0271, 0.0144.
+  No sign errors in any run. **Default t = h^2** (the paper's default; teeth have creases), trade-off documented.
+  Timing: 42 ms at 67^3, ~360 ms at 117^3 (native, threaded).
