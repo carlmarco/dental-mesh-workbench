@@ -1027,3 +1027,31 @@ Each entry: the choice, the alternatives considered, and the reason.
   where cone rays reach the stitched side wall (the D92 rim artifact), and the fold under the 0.3 mm fissure is only a
   few vertices wide on screen. The caption therefore quotes only the thinnest wall, which tests/test_offset.cpp ties
   to the occlusal table.
+
+## D98. M10f (part 1): hole filling after Liepa (2003)
+- core/holes: boundary loops; minimum-weight triangulation of each loop by dynamic programming (weight = largest dihedral
+  angle to neighbouring triangles including the rim faces, then area, lexicographic); refinement by centroid splits
+  where the centroid is farther than sqrt(2) times the local edge-length scale from every corner, with Delaunay flips
+  of patch edges; thin-plate fairing of the new vertices, (K D^-1 K)[interior] x = -(K D^-1 K)[interior, fixed] x_fixed
+  (K = graph Laplacian, D = degrees; SPD, solved with the envelope LDL^T of D49). Loops over 500 edges stay open.
+- The dihedral DP is not exactly optimal, and neither is the published one: the angle across a chord is taken against
+  the apex the sub-polygon chose for itself without knowing the outer triangle, so optimal substructure fails (exact
+  needs the outer apex in the state, O(n^4)). Exhaustive check on 120 random polygons of 4-8 vertices: the DP matches
+  the optimum on 111; the largest gap is 15.8 degrees. With area alone (Barequet & Sharir) the DP is exact on all 120.
+- Tests: boundary-loop counts; area-only DP = exhaustive minimum; a planar hole fills exactly planar; an off-centre
+  sphere with a cap removed closes to genus 0 with patch vertices within 0.05 of the sphere and inside the cap; a
+  forbidden chord is never used. Mutants: 5 killed, one (sign of the fairing right-hand side) only after the sphere was
+  moved off the origin (p -> -p keeps a centred unit sphere's radii, hiding the error) and patch vertices were checked to
+  lie in the cap.
+- Bugs found on real scans (the synthetic tests passed): filled scans were non-manifold on 6 of 21, with 20-137 edges
+  on more than two faces. Causes: (1) a triangulation chord between two loop vertices that already share a mesh edge
+  outside the hole; (2) refinement flips creating an edge that exists in the mesh, or (3) that an earlier flip in the
+  same pass created. Chords and flips are now checked against all existing edges; a loop whose every triangulation
+  would duplicate an edge stays open. After the fix: 21 of 21 valid.
+- Evaluation (tools/holes_eval; 50 sampled part-1 scans, 21 of them manifold and labelled; the others fail the
+  half-edge build): their own boundary loops of <= 500 edges (usually the open base cut): 105 of 105 filled, the result
+  a valid oriented manifold on 21 of 21, median 0.7 s per scan. Ground truth: a disk punched out of a crown and filled;
+  patch vertex distance to the removed surface, median over scans: 1.0 mm disks mean 0.088 mm, max 0.215 mm (worst scan
+  0.349); 1.5 mm disks mean 0.112 mm, max 0.245 mm (worst 0.503). An earlier version of the tool reported 28 mm: it
+  measured the patch over the open base cut too, which the default loop limit also fills; the disk is now punched out of
+  the scan after its own holes are filled, so it is the only loop the next fill touches.

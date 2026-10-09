@@ -28,7 +28,7 @@ result on scans, like M9. Shared infrastructure first.
 | 10c (done, D92) | Wall thickness map | minimum thickness for printing/milling (e.g. crowns, shells, printed models) | shape diameter function (Shapira, Shamir, Cohen-Or 2008): inward cone of rays, robust statistics | spherical shell: thickness = R_out - R_in; plate: its thickness |
 | 10d (done, D94) | Signed distance on open scans (M8) | an implicit surface for offsets, without repairing holes first | signed heat method (Feng & Crane 2024) on a background grid | sphere with a hole: signed distance vs analytic |
 | 10e (done, D95) | Offset surfaces: cement gap, hollowing for printing | GENERATES geometry: offset shells, hollowed models with a wall thickness | iso-surface of the signed distance (marching cubes; Lorensen & Cline 1987) | sphere offset by d: radius r + d within grid error, converging under refinement |
-| 10f | Hole filling and remeshing | the mesh-editing work of many CAD roles | hole filling (Liepa 2003), isotropic remeshing (Botsch & Kobbelt 2004) | Euler characteristic after filling; edge-length statistics after remeshing |
+| 10f (hole filling done, D98; remeshing next) | Hole filling and remeshing | the mesh-editing work of many CAD roles | hole filling (Liepa 2003), isotropic remeshing (Botsch & Kobbelt 2004) | Euler characteristic after filling; edge-length statistics after remeshing |
 
 10b and 10c are inspection (fast, directly dental CAD/CAM); 10d-10e are generation (the restoration and
 manufacturing side); 10f is breadth. "Out of scope" below is lifted for 10e-10f by this plan.

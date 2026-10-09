@@ -59,3 +59,8 @@ target_compile_options(thickness_eval PRIVATE -Wall -Wextra -Wpedantic -Wconvers
 add_executable(export_demo export_demo.cpp)
 target_link_libraries(export_demo PRIVATE dmw_core)
 target_compile_options(export_demo PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# Hole filling on scans: the scans' own holes, and punched crown disks against ground truth (M10f, D98).
+add_executable(holes_eval holes_eval.cpp)
+target_link_libraries(holes_eval PRIVATE dmw_core)
+target_compile_options(holes_eval PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)

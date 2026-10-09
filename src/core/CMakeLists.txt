@@ -1,4 +1,4 @@
-add_library(dmw_core STATIC io_obj.cpp io_stl.cpp weld.cpp halfedge.cpp generate.cpp topology.cpp curvature.cpp sparse.cpp dec.cpp geodesic.cpp cholesky.cpp intrinsic.cpp io_write.cpp handles.cpp json.cpp metrics.cpp cusps.cpp margin.cpp learn.cpp maxflow.cpp multilabel.cpp bvh.cpp undercut.cpp thickness.cpp sdf.cpp isosurface.cpp offset.cpp)
+add_library(dmw_core STATIC io_obj.cpp io_stl.cpp weld.cpp halfedge.cpp generate.cpp topology.cpp curvature.cpp sparse.cpp dec.cpp geodesic.cpp cholesky.cpp intrinsic.cpp io_write.cpp handles.cpp json.cpp metrics.cpp cusps.cpp margin.cpp learn.cpp maxflow.cpp multilabel.cpp bvh.cpp undercut.cpp thickness.cpp sdf.cpp isosurface.cpp offset.cpp holes.cpp)
 
 # PUBLIC include dir: anything linking dmw_core can #include "core/<header>.h".
 # The header lives under include/core/ so includes are namespaced by path.
