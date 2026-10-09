@@ -1,5 +1,7 @@
 # Mesh Inspection Workbench
 
+[![CI and Pages](https://github.com/carlmarco/dental-mesh-workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/carlmarco/dental-mesh-workbench/actions/workflows/ci.yml)
+
 A geometry-processing core in C++20, compiled natively and to WebAssembly, with a Three.js viewer. It started as
 mesh inspection (topology, curvature, geodesics) and grew into a training-free **tooth-gingiva segmentation of
 intraoral scans** plus manufacturing-oriented inspection (undercuts along a path of insertion, wall thickness).
@@ -11,9 +13,9 @@ lands **0.285 mm** from the labelled one on average (ASSD; median 0.219 mm), wit
 tooth IoU **0.936**. The first working version measured 0.551 mm / 0.815; each step in between came from measuring
 why the previous one failed ([case study](docs/CASE_STUDY.md), [all decisions](DECISIONS.md)).
 
-**Live demo:** published by the GitHub Pages workflow in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
-(`https://<user>.github.io/<repo>/` once the repository is pushed and Pages is set to "GitHub Actions").
-The demo meshes are generated in code. Files you open in the viewer are processed locally in your browser and
+**Live demo: [carlmarco.github.io/dental-mesh-workbench](https://carlmarco.github.io/dental-mesh-workbench/)**,
+built and deployed by CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml): native tests, WASM build, a
+cross-target smoke test, then GitHub Pages). The demo meshes are generated in code. Files you open in the viewer are processed locally in your browser and
 never uploaded; no dental scans are hosted (their licence does not allow it).
 
 ## How this was built
