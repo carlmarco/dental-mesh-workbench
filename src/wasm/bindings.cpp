@@ -17,6 +17,8 @@
 #include "core/margin.h"
 #include "core/bvh.h"
 #include "core/undercut.h"
+#include "core/offset.h"
+#include "core/thickness.h"
 #include "core/generate.h"
 #include "core/geodesic.h"
 #include "core/halfedge.h"
@@ -77,6 +79,7 @@ public:
         else if (name == "mobius") m = make_mobius(48);
         else if (name == "defects") m = make_defect_showcase();
         else if (name == "brick") m = make_brick_grid(30, 0.45);
+        else if (name == "tooth") m = make_synthetic_tooth();
         else return "unknown preset '" + name + "'";
         set_mesh(std::move(m));
         return {};
@@ -166,7 +169,28 @@ public:
           << ",\"evaluations\":" << evaluations << ",\"teethOnly\":" << (region.empty() ? "false" : "true") << "}";
         return o.str();
     }
-    val undercutFaces() const { return view(undercut_faces_); }  // uint8 per face: 0 outside, 1 reachable, 2 undercut
+    val undercutFaces() const { return view(undercut_faces_); }
+
+    // Replace the mesh by an offset shell of wall thickness `wall` (mesh units) behind it (D95): from the generalized
+    // signed distance (sdf = true; signed heat method + marching tetrahedra, at most 72 grid nodes per axis) or by
+    // moving vertices along normals (sdf = false, for comparison). Returns "" or an error.
+    std::string makeOffsetShell(double wall, bool sdf) {
+        if (mesh_.triangles.empty()) return "no mesh";
+        if (!(wall > 0.0)) return "the wall thickness must be positive";
+        TriMesh shell = sdf ? offset_shell_sdf(mesh_, wall, 0.0, 72) : offset_shell_naive(mesh_, wall);
+        if (shell.triangles.empty()) return "the offset produced no surface";
+        set_mesh(std::move(shell));
+        return {};
+    }
+    // Thinnest local wall per vertex (D92: cone minimum of rays into the solid; NaN where none applies).
+    val computeThickness() {
+        const Bvh bvh(mesh_.positions, mesh_.triangles);
+        const ThicknessField t = wall_thickness(mesh_, bvh);
+        thickness_.assign(t.cone_min.size(), std::numeric_limits<float>::quiet_NaN());
+        for (std::size_t v = 0; v < t.cone_min.size(); ++v)
+            if (std::isfinite(t.cone_min[v])) thickness_[v] = static_cast<float>(t.cone_min[v]);
+        return view(thickness_);
+    }  // uint8 per face: 0 outside, 1 reachable, 2 undercut
 
     val truthMarginEdges() const { return view(truth_edges_); }  // uint32 vertex pairs of all handle loops
 
@@ -339,6 +363,7 @@ private:
     std::vector<std::uint8_t> predicted_tooth_;
     std::unique_ptr<Bvh> bvh_;
     std::vector<std::uint8_t> undercut_faces_;
+    std::vector<float> thickness_;
 };
 
 }  // namespace
@@ -367,6 +392,8 @@ EMSCRIPTEN_BINDINGS(dmw) {
         .function("truthMarginEdges", &Session::truthMarginEdges)
         .function("computeUndercut", &Session::computeUndercut)
         .function("undercutFaces", &Session::undercutFaces)
+        .function("makeOffsetShell", &Session::makeOffsetShell)
+        .function("computeThickness", &Session::computeThickness)
         .function("setIntrinsicDelaunay", &Session::setIntrinsicDelaunay)
         .function("geodesic", &Session::geodesic)
         .function("distance", &Session::distance)

@@ -7,7 +7,7 @@ import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js
 import { categorical, diverging, NO_DATA, robustRange, type RGB, sequential } from "./colormap.ts";
 import type { MeshData } from "./dmw.ts";
 
-export type Overlay = "shaded" | "mean" | "gaussian" | "kmin" | "components" | "undercut" | "geodesic";
+export type Overlay = "shaded" | "mean" | "gaussian" | "kmin" | "components" | "undercut" | "thickness" | "geodesic";
 
 export interface Layers {
   boundary: boolean;
@@ -72,6 +72,8 @@ export class Viewer {
   private truthPoints: Float32Array | null = null; // loaded landmarks, xyz
   private marginEdges: Uint32Array | null = null;
   private undercut: Uint8Array | null = null;
+  private thickness: Float32Array | null = null;
+  private nominal = 1;
   private truthMarginEdges: Uint32Array | null = null;
   private source: number | null = null;
   private surface: THREE.Mesh | null = null;
@@ -133,6 +135,12 @@ export class Viewer {
     this.undercut = faces;
   }
 
+  // Per-vertex wall thickness for the "thickness" overlay, coloured relative to `nominal`; null clears it.
+  setThickness(values: Float32Array | null, nominal: number): void {
+    this.thickness = values;
+    this.nominal = nominal;
+  }
+
   setMargin(predicted: Uint32Array | null, truth: Uint32Array | null): void {
     this.marginEdges = predicted;
     this.truthMarginEdges = truth;
@@ -188,11 +196,15 @@ export class Viewer {
     } else {
       const nv = d.positions.length / 3;
       const col = new Float32Array(nv * 3);
-      const field = overlay === "mean" ? d.mean : overlay === "gaussian" ? d.gaussian : overlay === "kmin" ? d.kmin : null;
-      if (field) range = robustRange(field);
+      const thick = overlay === "thickness" && this.thickness?.length === nv ? this.thickness : null;
+      const field = thick ?? (overlay === "mean" ? d.mean : overlay === "gaussian" ? d.gaussian : overlay === "kmin" ? d.kmin : null);
+      if (field && !thick) range = robustRange(field);
+      if (thick) range = this.nominal;
       for (let v = 0; v < nv; ++v) {
         const x = field ? field[v] : 0;
-        col.set(!field ? SHADED : Number.isFinite(x) ? diverging(x / range!) : NO_DATA, 3 * v);
+        // Thickness: red below the nominal wall, white at it, blue above (diverging around the nominal).
+        const c = thick ? diverging((this.nominal - x) / this.nominal) : diverging(x / range!);
+        col.set(!field ? SHADED : Number.isFinite(x) ? c : NO_DATA, 3 * v);
       }
       geometry.setAttribute("position", new THREE.BufferAttribute(d.positions, 3));
       geometry.setAttribute("color", new THREE.BufferAttribute(col, 3));

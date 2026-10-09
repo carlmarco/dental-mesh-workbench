@@ -301,3 +301,14 @@ TEST_CASE("margin: learned data term - a neutral model changes nothing, a confid
     CHECK(lost == 0);
     CHECK(gained > 0);
 }
+
+TEST_CASE("margin: the synthetic molar's tooth-gingiva boundary is found at its crease", "[margin]") {
+    const auto mesh = he(make_synthetic_tooth());
+    const MarginResult r = detect_margin(mesh, margin_operating_point());
+    std::vector<std::uint8_t> truth(mesh.positions.size());
+    for (std::size_t v = 0; v < truth.size(); ++v)
+        truth[v] = std::hypot(mesh.positions[v].x, mesh.positions[v].y) < synthetic_tooth_radius ? 1 : 0;
+    const auto m = compare_boundaries(edge_midpoints(mesh, r.margin), edge_midpoints(mesh, label_boundary_edges(mesh, truth)));
+    CHECK(m.assd < 0.1);  // measured 0.021 mm
+    CHECK(m.f1_050 > 0.95);
+}

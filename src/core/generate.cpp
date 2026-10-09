@@ -207,6 +207,25 @@ TriMesh make_mobius(std::uint32_t segments, double radius, double half_width) {
     return m;
 }
 
+TriMesh make_synthetic_tooth(std::uint32_t n) {
+    TriMesh m = make_grid(n, n);
+    const double r0 = synthetic_tooth_radius, wall = 1.4, height = 5.0;
+    for (auto& p : m.positions) {
+        p.x = 14.0 * p.x - 7.0, p.y = 14.0 * p.y - 7.0;
+        const double r = std::hypot(p.x, p.y);
+        double t = std::clamp((r0 - r) / wall, 0.0, 1.0);  // 0 at the crease (crown base), 1 on the occlusal table
+        t = t * t * (3.0 - 2.0 * t);                         // smoothstep: zero slope at the base -> a concave crease
+        double top = height;
+        for (double cx : {-1.5, 1.5})
+            for (double cy : {-1.5, 1.5}) top += 1.0 * std::exp(-((p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy)) / (2.0 * 0.9 * 0.9));
+        const double fx = std::exp(-p.x * p.x / (2.0 * 0.3 * 0.3)), fy = std::exp(-p.y * p.y / (2.0 * 0.3 * 0.3));
+        top -= 0.8 * std::max(fx, fy);                     // cross-shaped fissure between the cusps
+        const double gum = -0.03 * (p.x * p.x + p.y * p.y) / 7.0;  // gently sloping gingiva
+        p.z = gum + t * (top - gum);
+    }
+    return m;
+}
+
 TriMesh make_brick_grid(std::uint32_t n, double shift) {
     TriMesh m = make_grid(n, n);
     for (auto& p : m.positions) {

@@ -997,3 +997,19 @@ Each entry: the choice, the alternatives considered, and the reason.
   default). Values within 1e-10 h of the iso value now snap to 0, so every near-node crossing uses the shared node
   vertex. Reproduced and verified under x86 emulation (docker --platform linux/amd64; all 170 tests pass); pre-push
   checks now include that platform.
+
+## D96. Offset shells and thickness in the viewer; a synthetic molar for shareable demos
+- core/offset: offset_shell_sdf (signed heat distance + marching tetrahedra; grid sized by a node budget per axis)
+  and offset_shell_naive (vertices along normals + stitched side wall), side by side. Viewer: wall input, "Offset shell
+  (SDF)", "Offset shell (naive)" (each replaces the mesh, so every analysis runs on the shell), "Thickness map" (cone
+  minimum per vertex, coloured around the wall: red thinner, white nominal, blue thicker; thinnest, median and the share
+  below 95% of the wall). The browser uses at most 72 grid nodes per axis (96 gave 129k-vertex shells and 4 s maps).
+- make_synthetic_tooth: a 14 x 14 mm gum patch with a crown (radius 4 mm, four cusps, a 0.3 mm cross fissure) whose
+  wall rises from a concave crease at r = 4 mm, the known tooth-gingiva boundary. Generated in code, so demos and
+  recordings can show a tooth without redistributing licensed scans. Measured: margin detection ASSD 0.021 mm, F1 1.0
+  vs the known boundary; 1 mm shells, thinnest occlusal wall: naive ~0 mm (the inner copy folds through itself under
+  the fissure; 41% of the occlusal table below 0.95 mm), SDF 0.911 mm (grid error at 72 nodes; 2.8%). In the browser:
+  naive thinnest 5e-5, SDF 0.911 (~1.6 s per map). Tests lock both properties in.
+- Torus with wall = tube radius (0.3): the SDF shell correctly leaves a solid tube (no room for an inner wall), while the
+  naive shell collapses its inner copy onto the tube's centre circle and a thickness check reads ~0.3 as if fine: the
+  naive offset can fool the very check meant to catch it.

@@ -6,6 +6,7 @@ import { Dmw, type MeshData, type Preset, PRESETS, type Stats } from "./dmw.ts";
 import { ISOLINES, LAYER_COLORS, type Layers, type Overlay, Viewer } from "./viewer.ts";
 
 const LABELS: Record<Preset, string> = {
+  tooth: "Synthetic molar on gum (mm)",
   plate_handle: "Plate with a handle (genus 1)",
   grid_holes: "Plate with two holes (genus 0)",
   defects: "Defect showcase",
@@ -106,6 +107,12 @@ function renderLegend(range: number | null): void {
   const legend = byId<HTMLDivElement>("legend");
   if (range === null) {
     legend.innerHTML = "";
+    return;
+  }
+  if (overlay() === "thickness") {
+    legend.innerHTML = `<div class="ramp"></div>
+      <div class="ramp-labels"><span>thicker</span><span>${fmt(range)} (wall)</span><span>thinner</span></div>
+      <div>${esc(thicknessInfo)}</div>`;
     return;
   }
   if (overlay() === "geodesic") {
@@ -284,6 +291,40 @@ labelInput.addEventListener("change", async () => {
 });
 
 let undercutInfo = "";
+let thicknessInfo = "";
+const wallInput = byId<HTMLInputElement>("wall");
+const wall = () => Math.max(1e-6, Number(wallInput.value) || 0.1);
+function runShell(sdf: boolean): void {
+  if (!data) return;
+  try {
+    const t0 = performance.now();
+    const d = dmw.makeOffsetShell(wall(), sdf);
+    const ms = performance.now() - t0;
+    viewer.setThickness(null, wall());
+    viewer.setUndercut(null);
+    display(d, false); // a new mesh: full display (re-frames the camera)
+    errorBox.textContent = "";
+    thicknessInfo = `${sdf ? "Signed-distance" : "Naive (normal offset)"} shell, wall ${wall()}: built in ${ms.toFixed(0)} ms. Run the thickness map to check it.`;
+    renderLegend(null);
+  } catch (e) {
+    errorBox.textContent = (e as Error).message;
+  }
+}
+function runThickness(): void {
+  if (!data) return;
+  const t = dmw.computeThickness();
+  const finite = [...t.values].filter(Number.isFinite).sort((a, b) => a - b);
+  viewer.setThickness(t.values, wall());
+  const below = finite.filter((x) => x < 0.95 * wall()).length;
+  thicknessInfo = finite.length
+    ? `Thinnest wall ${fmt(finite[0])}, median ${fmt(finite[Math.floor(finite.length / 2)])}; ${((100 * below) / finite.length).toFixed(1)}% of vertices below 95% of the wall (${t.millis.toFixed(0)} ms). Gray: no thickness (open surface).`
+    : "No thickness: the surface is open (make a shell first).";
+  document.querySelector<HTMLInputElement>('input[name="overlay"][value="thickness"]')!.checked = true;
+  display(data, true);
+}
+byId<HTMLButtonElement>("shell-sdf").addEventListener("click", () => runShell(true));
+byId<HTMLButtonElement>("shell-naive").addEventListener("click", () => runShell(false));
+byId<HTMLButtonElement>("thickness").addEventListener("click", runThickness);
 function runUndercut(best: boolean): void {
   if (!data) return;
   try {

@@ -64,6 +64,7 @@ export interface MeshData {
 }
 
 export const PRESETS = [
+  "tooth",
   "plate_handle",
   "grid_holes",
   "defects",
@@ -136,6 +137,17 @@ export class Dmw {
     const info = JSON.parse(this.session.computeUndercut(best)) as { error?: string; axis: number[]; tilt: number; fraction: number; teethOnly: boolean };
     if (info.error) throw new Error(info.error);
     return { ...info, faces: (this.session.undercutFaces() as Uint8Array).slice(), millis: performance.now() - t0 };
+  }
+
+  // Replaces the current mesh by an offset shell (D95) and returns the new mesh data.
+  makeOffsetShell(wall: number, sdf: boolean): MeshData {
+    return this.run(() => this.session.makeOffsetShell(wall, sdf));
+  }
+
+  computeThickness(): { values: Float32Array; millis: number } {
+    const t0 = performance.now();
+    const values = (this.session.computeThickness() as Float32Array).slice();
+    return { values, millis: performance.now() - t0 };
   }
 
   detectMargin(): { edges: Uint32Array; millis: number } {

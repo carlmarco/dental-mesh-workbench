@@ -61,6 +61,13 @@ TriMesh make_defect_showcase();
 // diffusion breaks the maximum principle; the intrinsic Delaunay Laplacian fixes it (M6b, D55).
 TriMesh make_brick_grid(std::uint32_t n, double shift = 0.45);
 
+// Synthetic molar on a gum patch (D96), in mm: a 14 x 14 mm open height-field patch (n x n cells) with a crown of
+// radius 4 mm and height ~5 mm whose wall rises from a concave crease at r = 4 (the tooth-gingiva boundary), four
+// cusps and a cross-shaped occlusal fissure. Generated in code, so it can be shown and shared freely (unlike scans).
+// Ground truth: a vertex is tooth iff hypot(x, y) < synthetic_tooth_radius.
+inline constexpr double synthetic_tooth_radius = 4.0;
+TriMesh make_synthetic_tooth(std::uint32_t n = 140);
+
 // Disjoint union: appends src to dst, offsetting src's indices.
 void append(TriMesh& dst, const TriMesh& src);
 
