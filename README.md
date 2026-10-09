@@ -16,6 +16,14 @@ why the previous one failed ([case study](docs/CASE_STUDY.md), [all decisions](D
 The demo meshes are generated in code. Files you open in the viewer are processed locally in your browser and
 never uploaded; no dental scans are hosted (their licence does not allow it).
 
+## How this was built
+
+Built with an AI coding assistant (Claude Code), which wrote most of the code; commits carry its co-author line.
+The author chose the problems and methods, made or approved every design decision, designed the evaluation
+protocol and audited the results. Each decision, alternative and measurement is recorded in
+[DECISIONS.md](DECISIONS.md), including the wrong turns, and every algorithm is checked against an independent
+reference rather than trusted.
+
 ## What it does
 
 | Stage | What | Reference |
